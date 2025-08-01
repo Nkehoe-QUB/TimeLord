@@ -72,11 +72,11 @@ class Process():
             t_found=False
             for line in file:
                 if not l_found:
-                    lmatch = re.search(r'lambda_las\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    lmatch = re.search(r'^\s*lambda_las\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch:
                         lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
-                    lmatch2 = re.search(r'lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    lmatch2 = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch2:
                         lambda_las = float(lmatch2.group(1)) * getattr(self, lmatch2.group(2))
                         l_found=True
