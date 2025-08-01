@@ -1,7 +1,7 @@
 from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation
 
 class Process():
-    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True):
+    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False):
         ########### Constants ##################################
         self.c = 299792458. 
         self.me = 9.11e-31
@@ -30,6 +30,7 @@ class Process():
         import matplotlib.colors as colors
         import matplotlib.gridspec as gridspec
         import pandas as pd
+        from skimage.measure import block_reduce
         try:
             import pyfiglet
             Title = True
@@ -45,10 +46,12 @@ class Process():
         self.cm = colors
         self.gs = gridspec
         self.re = re
+        self.block_reduce = block_reduce
         self.SimName = SimName
         self.SimulationPath = self.os.path.abspath(self.SimName)
         self.Log = Log
         self.Movie = Movie
+        self.Test = Test
         self.plt.rcParams["axes.labelsize"] = 16
         self.plt.rcParams["axes.titlesize"] = 16
         self.plt.rcParams["xtick.labelsize"] = 14
@@ -74,15 +77,18 @@ class Process():
                 if not l_found:
                     lmatch = re.search(r'^\s*lambda_las\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch:
+                        if Test: print(f"Found lambda_las: {lmatch.group(1)} * {lmatch.group(2)}")
                         lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
                     lmatch = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch:
+                        if Test: print(f"Found lambda0: {lmatch.group(1)} * {lmatch.group(2)}")
                         lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
                 if not x_found:
                     xmatch = re.search(r'^\s*xMin\s*=\s*-([\d.]+)\s*\*\s*(\w+)', line)
                     if xmatch:
+                        if Test: print(f"Found xMin: {xmatch.group(1)} * {xmatch.group(2)}, {hasattr(self, xmatch.group(2))}")
                         if hasattr(self, xmatch.group(2)):
                             self.x_spot = float(xmatch.group(1)) * getattr(self, xmatch.group(2))
                         elif xmatch.group(2) == 'micron':
@@ -91,17 +97,18 @@ class Process():
                 if not t_found:
                     tmatch = re.search(r'^\s*tau_fwhm_I\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if tmatch:
+                        if Test: print(f"Found tau_fwhm_I: {tmatch.group(1)} * {tmatch.group(2)}")
                         self.Tau = float(tmatch.group(1)) * getattr(self, tmatch.group(2))
                         t_found=True
-                if l_found and t_found:# and x_found:
+                if l_found and t_found and x_found:
                     break
             if lmatch is None:
                 raise ValueError("\033[1;31mlambda_las or lambda0 not found in simulation file\033[0m")
-            # if xmatch is None:
-            #     print("\033[1;31mx_vac not found in simulation file! Setting to 0\033[0m")
-            #     self.x_spot = 0
+            if xmatch is None:
+                print("\033[1;31mxMin not found in simulation file! Setting to 0\033[0m")
+                self.x_spot = 0
             if tmatch is None:
-                print("\033[1;31mTau_I not found in simulation file! Setting to 0\033[0m")
+                print("\033[1;31mtau_fwhm_I not found in simulation file! Setting to 0\033[0m")
                 self.Tau = 0
         omega_las = 2.*self.np.pi*self.c / lambda_las
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2
@@ -156,36 +163,69 @@ class Process():
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
 
-    def GetData(self, Diag, Name, AxisNames, NumFiles=0, Averaged=False, Z=None):
-        if NumFiles == 0:
-            NumFiles = self.LenSim
+    def GetData(self, Diag, Name, AxisNames, Averaged=False, Z=None, dx=None, dy=None):
+        if dx is not None or dy is not None:
+            reduce = True
+            if dx is None: dx = 1
+            if dy is None: dy = 1
+            print(f"Reducing data by a factor of {dx} in x and {dy} in y")
+        else:
+            reduce = False
         AxisNames.append("Time")  # Add time axis
-        Axis = {axis: self.np.array() for axis in AxisNames}
+        if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
+        Axis = {axis: self.np.array(()) for axis in AxisNames}
         attr = Diag + "_" + Name
         if Averaged:
             attr += "_averaged"
         if not hasattr(self.sh.getdata(self.os.path.join(self.SimulationPath, "0000.sdf"), verbose=False), attr):
             raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
-        
-        Data = self.np.array()
-        for i in range(NumFiles):
+
+        Data = []
+        for i in range(self.LenSim):
+            if self.Test: print(f"Processing file {i:04d}.sdf")
             File = self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False)
             
             for axis in AxisNames:
-                if axis in ["x", "y", "z"] and i == 0:
-                    Axis[axis] = self.np.array(File.__dict__[attr].grid.data[AxisNames.index(axis)]) * self.micro  # Convert to micrometers
-                else:
-                    Axis[axis] = self.np.vstack((Axis[axis], self.np.array(File.__dict__[attr].grid.data[AxisNames.index(axis)])))
-            
+                if self.Test: print(f"Processing axis: {axis}")
+                if i == 0:
+                    if axis in ["x", "y", "z"]:
+                        Axis[axis] = self.np.array(File.__dict__[attr].grid.data[AxisNames.index(axis)]) / self.micro  # Convert to micrometers
+                        if reduce:
+                            if axis == "x":
+                                nx = Axis["x"].shape[0] // dx
+                                Axis["x"] = Axis["x"][:nx * dx:dx]
+                            elif axis == "y":
+                                ny = Axis["y"].shape[0] // dy
+                                Axis["y"] = Axis["y"][:ny * dy:dy]
+                    elif axis == "Time":
+                        Axis[axis] = [float(File.Header["time"]) / self.femto - self.t0]  # Convert time to femtoseconds and add t0
+                    else:
+                        Axis[axis] = [File.__dict__[attr].grid.data[AxisNames.index(axis)]]
+
+                elif i > 0 and axis not in ["x", "y", "z"]:
+                    if self.Test: print(f"Appending data to axis: {axis}, index: {AxisNames.index(axis)}")
+                    if axis == "Time":
+                        Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
+                    else:
+                        Axis[axis].append(File.__dict__[attr].grid.data[AxisNames.index(axis)])
+
+    
             if Averaged and i == 0:
-                Data = self.np.vstack((Data, self.np.full((Axis["x"].shape[0], Axis["y"].shape[0]), self.np.nan)))
+                Data.append(self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0])))
             else:
                 if Name == "rel electron density":
                     Gamma = 1 + (self.np.array(Data.Derived_Average_Particle_Energy_electron.data) / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
-                    Data = self.np.vstack((Data, self.np.array(File.__dict__[attr].data) / Gamma))  # Normalize by gamma factor
+                    if reduce:
+                        Data.append(self.block_reduce((self.np.array(File.__dict__[attr].data) / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
+                    else:
+                        Data.append(self.np.array(File.__dict__[attr].data) / Gamma)
                 else:
-                    Data = self.np.vstack((Data, self.np.array(File.__dict__[attr].data)))
+                    if reduce:
+                        Data.append(self.block_reduce(self.np.array(File.__dict__[attr].data)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
+                    else:
+                        Data.append(self.np.array(File.__dict__[attr].data))
 
+        Data = self.np.stack(Data, axis=0)  # Stack the data along the first axis (time)
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
         elif Diag == "Electric_Field":
@@ -205,21 +245,15 @@ class Process():
             if Z is None:
                 raise ValueError("Species not recognised or number of nucleons (Z) not provided")
             Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
-        if 'Time' in AxisNames:
-            Axis['Time'] = Axis['Time'] * self.femto - self.t0  # Convert time to femtoseconds and add t0
         
         return Data, Axis
 
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, File=None):
+    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=None, dy=None, File=None):
         if not Species and (E_las and E_avg) is None:
             raise ValueError("No species or field were provided")
         if Species and not isinstance(Species, list):
             Species = [Species]
-        if E_las and not isinstance(E_las, list):
-            E_las = [E_las]
-        if E_avg and not isinstance(E_avg, list):
-            E_avg = [E_avg]
         if Colours is not None and not isinstance(Colours, list):
             if not isinstance(Colours, str):
                 raise ValueError("Colours must be a list of strings")
@@ -230,9 +264,9 @@ class Process():
                 Colours = None
             else: Colours = [Colours]
         if E_las:
-            E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis)
+            E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, dx=dx, dy=dy)
         elif E_avg:
-            E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Averaged=True)
+            E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Averaged=True, dx=dx, dy=dy)
 
         den_to_plot={}
         axis={}
@@ -241,7 +275,7 @@ class Process():
             Diag = "Derived_Number_Density"
             d_max = {type:0 for type in Species}
             for type in Species:
-                den_to_plot[type], axis[type] = self.GetData(Diag, type, self.space_axis)
+                den_to_plot[type], axis[type] = self.GetData(Diag, type, self.space_axis, dx=dx, dy=dy)
                 d_max[type] = CBMax if CBMax is not None else round_up_scientific_notation(self.np.max(den_to_plot[type]))
         
         if Species: print(f"\nPlotting {Species} densities")
@@ -269,6 +303,7 @@ class Process():
                 if Species:
                     for type in Species:
                         SaveFile=TempFile if File is not None else f"{type}_" + TempFile
+                        if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type][i].T.shape)
                         cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type][i].T, cmap=self.cmaps.batlowW_r if Colours is None else getattr(self.cmaps, Colours[Species.index(type)]), norm=self.cm.LogNorm(vmin=d_max[type]/1e6 if CBMin is None else CBMin, vmax=d_max[type]))
                         if (Colours is not None) and (len(Colours) > 1) and (not E_las or not E_avg) and not Plotted:
                             cbar=fig.colorbar(cax, aspect=50, location='right')
@@ -309,7 +344,7 @@ class Process():
             self.plt.savefig(self.raw_path + "/" + SaveFile + "_" + str(i) + ".png",dpi=200)
             Plotted = True
             if self.Log: 
-                PrintPercentage(i, self.TimeSteps.size -1 )
+                PrintPercentage(i, self.LenSim -1 )
         print(f"\nDensities saved in {self.raw_path}")
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, FinalFile, SaveFile)

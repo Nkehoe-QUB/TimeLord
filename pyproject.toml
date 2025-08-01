@@ -14,6 +14,15 @@ authors = [
 description = "Post processing package for EPOCH"
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+  "numpy",
+  "pandas",
+  "cmcrameri",
+  "scipy",
+  "matplotlib",
+  "pyfiglet",
+  "scikit-image"
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
