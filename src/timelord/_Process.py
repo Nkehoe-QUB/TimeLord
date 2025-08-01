@@ -68,7 +68,7 @@ class Process():
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
-            # x_found=False
+            x_found=False
             t_found=False
             for line in file:
                 if not l_found:
@@ -80,13 +80,16 @@ class Process():
                     if lmatch:
                         lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
-                # if not x_found:
-                #     xmatch = re.search(r'x_vac\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
-                #     if xmatch:
-                #         self.x_spot = float(xmatch.group(1)) * getattr(self, xmatch.group(2))
-                #         x_found=True
+                if not x_found:
+                    xmatch = re.search(r'^\s*xMin\s*=\s*-([\d.]+)\s*\*\s*(\w+)', line)
+                    if xmatch:
+                        if hasattr(self, xmatch.group(2)):
+                            self.x_spot = float(xmatch.group(1)) * getattr(self, xmatch.group(2))
+                        elif xmatch.group(2) == 'micron':
+                            self.x_spot = float(xmatch.group(1)) * self.micro
+                        x_found=True
                 if not t_found:
-                    tmatch = re.search(r'tau_fwhm_I\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    tmatch = re.search(r'^\s*tau_fwhm_I\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if tmatch:
                         self.Tau = float(tmatch.group(1)) * getattr(self, tmatch.group(2))
                         t_found=True
