@@ -61,7 +61,7 @@ class Process():
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
-        self.LenSim = ([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
+        self.LenSim = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
         if self.LenSim == 0:
             raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
         else: Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
