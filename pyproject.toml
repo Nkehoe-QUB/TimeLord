@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "timelord"
+version = "0.0.1"
+authors = [
+  { name="Noel Kehoe", email="nkehoe01@qub.ac.uk" },
+]
+description = "Post processing package for EPOCH"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Nkehoe-QUB/TimeLord.git"
+Issues = "https://github.com/Nkehoe-QUB/TimeLord.gitissues"
