@@ -76,9 +76,9 @@ class Process():
                     if lmatch:
                         lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
-                    lmatch2 = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
-                    if lmatch2:
-                        lambda_las = float(lmatch2.group(1)) * getattr(self, lmatch2.group(2))
+                    lmatch = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    if lmatch:
+                        lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
                         l_found=True
                 # if not x_found:
                 #     xmatch = re.search(r'x_vac\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
