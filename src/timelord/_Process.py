@@ -380,8 +380,8 @@ class Process():
             label[type] = type
         
         if DataOnly:
-            return {type: spect_to_plot[type] for type in Species}, axis
-        
+            return {type: {'data': spect_to_plot[type], 'axis': axis[type]} for type in Species}
+
         print(f"\nPlotting {Species} spectra")
         x_max={type:0 for type in Species}
         y_max={type:0 for type in Species}
