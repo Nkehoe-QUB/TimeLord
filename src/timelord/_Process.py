@@ -68,6 +68,7 @@ class Process():
         if self.LenSim == 0:
             raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
         else: Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
+        self.Files = [self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False) for i in range(self.LenSim)]
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
@@ -164,7 +165,7 @@ class Process():
         if self.Log: print(Message)
 
     def GetData(self, Diag, Name, AxisNames, Averaged=False, Z=None, dx=None, dy=None):
-        if dx is not None or dy is not None:
+        if (dx is not None or dy is not None) and (dx != 1 and dy != 1):
             reduce = True
             if dx is None: dx = 1
             if dy is None: dy = 1
@@ -177,19 +178,18 @@ class Process():
         attr = Diag + "_" + Name
         if Averaged:
             attr += "_averaged"
-        if not hasattr(self.sh.getdata(self.os.path.join(self.SimulationPath, "0000.sdf"), verbose=False), attr):
+        if not hasattr(self.Files[0], attr):
             raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
 
         Data = []
-        for i in range(self.LenSim):
+        for i, File in enumerate(self.Files):
             if self.Test: print(f"Processing file {i:04d}.sdf")
-            File = self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False)
             
             for axis in AxisNames:
                 if self.Test: print(f"Processing axis: {axis}")
                 if i == 0:
                     if axis in ["x", "y", "z"]:
-                        Axis[axis] = self.np.array(File.__dict__[attr].grid.data[AxisNames.index(axis)]) / self.micro  # Convert to micrometers
+                        Axis[axis] = self.np.array(getattr(File, attr).grid.data[AxisNames.index(axis)]) / self.micro  # Convert to micrometers
                         if reduce:
                             if axis == "x":
                                 nx = Axis["x"].shape[0] // dx
@@ -207,24 +207,30 @@ class Process():
                     if axis == "Time":
                         Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
                     else:
-                        Axis[axis].append(File.__dict__[attr].grid.data[AxisNames.index(axis)])
+                        Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
                 
-
-    
             if Averaged and i == 0:
                 Data.append(self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0])))
+                print("Skipped averaging for the first file")
             else:
+                Den = self.np.array(getattr(File, attr).data)
                 if Name == "rel electron density":
                     Gamma = 1 + (self.np.array(Data.Derived_Average_Particle_Energy_electron.data) / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                     if reduce:
-                        Data.append(self.block_reduce((self.np.array(File.__dict__[attr].data) / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
+                        Den = self.np.where(Den == 0, self.np.nan, Den)  # Replace zeros with NaN to avoid division by zero
+                        with self.np.errstate(invalid='ignore'):
+                            Data.append(self.block_reduce((Den / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
                     else:
-                        Data.append(self.np.array(File.__dict__[attr].data) / Gamma)
+                        Data.append(Den / Gamma)
                 else:
                     if reduce:
-                        Data.append(self.block_reduce(self.np.array(File.__dict__[attr].data)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
+                        if self.Test: print(f"Got Data shape: {Den.shape}")
+                        Den = self.np.where(Den == 0, self.np.nan, Den)
+                        with self.np.errstate(invalid='ignore'):
+                            Data.append(self.block_reduce((Den[:nx * dx, :ny * dy]), (dx, dy), self.np.nanmean))
+                        if self.Test: print(f"Reduced Data shape: {Data[-1].shape}")
                     else:
-                        Data.append(self.np.array(File.__dict__[attr].data))
+                        Data.append(Den)
 
         for axis in AxisNames: Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
         Data = self.np.stack(Data, axis=0)  # Stack the data along the first axis (time)
@@ -266,10 +272,10 @@ class Process():
                 Colours = None
             else: Colours = [Colours]
         if E_las:
-            print(f"Getting {E_las} data")
+            print(f"\nGetting {E_las} data")
             E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, dx=dx, dy=dy)
         elif E_avg:
-            print(f"Getting averaged {E_avg} data")
+            print(f"\nGetting averaged {E_avg} data")
             E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Averaged=True, dx=dx, dy=dy)
 
         den_to_plot={}
@@ -278,7 +284,7 @@ class Process():
         if Species:
             d_max = {type:0 for type in Species}
             for type in Species:
-                print(f"Getting {type} data")
+                print(f"\nGetting {type} data")
                 den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, dx=dx, dy=dy)
                 d_max[type] = CBMax if CBMax is not None else round_up_scientific_notation(self.np.max(den_to_plot[type]))
         
@@ -380,8 +386,8 @@ class Process():
             label[type] = type
         
         if DataOnly:
-            return {type: {'data': spect_to_plot[type], 'axis': axis[type]} for type in Species}
-
+            return {type: spect_to_plot[type] for type in Species}, axis
+        
         print(f"\nPlotting {Species} spectra")
         x_max={type:0 for type in Species}
         y_max={type:0 for type in Species}
@@ -423,7 +429,7 @@ class Process():
         print(f"\nGetting data")
         if self.Log: 
             PrintPercentage(0, 3 )
-        tmp = self.DensityPlot('electron', DataOnly=True)['electron']
+        tmp = self.DensityPlot('electron', dx=dx, dy=dy, DataOnly=True)['electron']
         data['electron'], axis['electron'] = tmp['data'], tmp['axis']
         if self.Log: 
             PrintPercentage(1, 3 )
