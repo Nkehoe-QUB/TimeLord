@@ -251,7 +251,7 @@ class Process():
         return Data, Axis
 
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=None, dy=None, File=None):
+    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=None, dy=None, File=None, DataOnly=False):
         if not Species and (E_las and E_avg) is None:
             raise ValueError("No species or field were provided")
         if Species and not isinstance(Species, list):
@@ -281,6 +281,17 @@ class Process():
                 print(f"Getting {type} data")
                 den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, dx=dx, dy=dy)
                 d_max[type] = CBMax if CBMax is not None else round_up_scientific_notation(self.np.max(den_to_plot[type]))
+        
+        if DataOnly:
+            to_return = {}
+            if Species:
+                for type in Species:
+                    to_return[type] = {'data': den_to_plot[type], 'axis': axis[type]}
+            if E_las:
+                to_return[E_las] = {'data': E_data, 'axis': E_axis}
+            if E_avg:
+                to_return[E_avg] = {'data': E_data, 'axis': E_axis}
+            return to_return
         
         if Species: print(f"\nPlotting {Species} densities")
         else: print(f"\nPlotting {E_las if E_las else E_avg} field")
@@ -401,6 +412,83 @@ class Process():
             if self.Log: 
                 PrintPercentage(i, self.LenSim -1 )
         print(f"\nSpectra saved in {self.raw_path}")
+        if self.Movie:
+            MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+            print(f"\nMovies saved in {self.pros_path}")
+    
+    def LasIonFrontPlot(self, FSpot=1.0, EMax=None, XMin=None, XMax=None, dx=1, dy=1, File=None):
+        SaveFile=File if File is not None else "Las_Ion_Front"
+        data = {}
+        axis = {}
+        print(f"\nGetting data")
+        if self.Log: 
+            PrintPercentage(0, 3 )
+        tmp = self.DensityPlot('electron', DataOnly=True)['electron']
+        data['electron'], axis['electron'] = tmp['data'], tmp['axis']
+        if self.Log: 
+            PrintPercentage(1, 3 )
+        data['proton'], axis['proton'] = self.GetData('dist_fn_x_energy', 'proton', ['x', 'ekin'])
+        if self.Log: 
+            PrintPercentage(2, 3 )
+        tmp = self.DensityPlot(E_avg='Ex', dx=dx, dy=dy, DataOnly=True)['Ex']
+        data['ex'], axis['ex'] = tmp['data'], tmp['axis']
+        if self.Log: 
+            PrintPercentage(3, 3 )
+        print(f"\nData loaded")
+
+        num_protons = data['proton'].shape[1]
+
+        ion_front = self.np.zeros(self.LenSim)
+        las_front = self.np.zeros(self.LenSim)
+
+        print(f"\nCalculating Laser-Ion-Fronts")
+        for t in range(1, self.LenSim):
+            Outline = self.np.zeros(num_protons)
+
+            args = self.np.argwhere(self.np.sum(data['proton'][t], axis=0) >= 1e12)[:,0]
+            for j in range(num_protons):
+                try: Outline[j] = self.np.max(axis['proton']['ekin'][t][data['proton'][t][j,args] > 1e5])
+                except ValueError: Outline[j] = 0
+            ion_front = axis['proton']['x'][self.np.argmax(Outline)]
+
+            Ex_arg = self.np.argwhere(abs(axis['ex']['y']) < 0.5)
+            ExField = self.np.reshape(self.np.mean(data['ex'][t][:, Ex_arg], axis=1), axis['ex']['x'].shape)
+            las_front = axis['ex']['x'][self.np.argmax(ExField)]
+
+        print(f"\nPlotting Laser-Ion-Fronts")
+        xmin = self.np.min(axis['ex']['x']) if XMin is None else XMin
+        xmax = self.np.max(axis['ex']['x']) if XMax is None else XMax
+        for t in range(1, self.LenSim):
+            fig, ax = self.plt.subplots(3, sharex=True, num=11, clear=True, figsize=(8, 10))
+            ax[0].pcolormesh(axis['ex']['x'], axis['ex']['y'], data['ex'][t].T, cmap=self.cmaps.vik, norm=self.cm.CenteredNorm(halfrange=self.max_number if EMax is None else EMax))
+            ax2=ax[1].twinx()
+            ax[1].plot(axis['electron']['x'], self.np.mean(data['electron'][t][:, self.np.argwhere(abs(axis['electron']['y']) < 0.5)], axis=1), color='blue')
+            ax2.plot(axis['ex']['x'], self.np.mean(data['ex'][t][:, Ex_arg], axis=1), color='red')
+            ax[2].pcolormesh(axis['proton']['x'], axis['proton']['ekin'][t], data['proton'][t].T, norm=self.cm.LogNorm(vmin=round_up_scientific_notation(self.np.max(data['proton']))/1e6, vmax=round_up_scientific_notation(self.np.max(data['proton']))), cmap=self.cmaps.batlowW_r)
+            ax[0].set(ylabel='y [$\\mu$m]')
+            ax[1].set(yscale='log', ylim=(1e-2, 5e1), ylabel='N$_e$ [N$_c$]')
+            ax[2].set(ylim=(0, self.np.max(axis['proton']['ekin'])), ylabel='E [MeV]',
+                      xlabel='x [$\\mu$m]', xlim=(xmin, xmax))
+            ax2.set(ylim=(-self.max_number, self.max_number), ylabel='E$_x$ [V/m]')
+            ax[1].grid()
+            ax[2].grid()
+            ax[0].axvline(x=ion_front[t], color='green', linestyle='--')
+            ax[0].axvline(x=las_front[t], color='red', linestyle='--')
+            ax[1].axvline(x=ion_front[t], color='green', linestyle='--')
+            ax[1].axvline(x=las_front[t], color='red', linestyle='--')
+            ax[2].axvline(x=ion_front[t], color='green', linestyle='--')
+            ax[2].axvline(x=las_front[t], color='red', linestyle='--')
+            for a in ax.flatten():
+                for label in (a.get_xticklabels() + a.get_yticklabels()): 
+                    label.set_fontsize(16)
+                a.xaxis.label.set_fontsize(18)
+                a.yaxis.label.set_fontsize(18)
+            fig.suptitle(f"{axis['proton']['Time'][t]} fs", fontsize=22)
+            fig.tight_layout()
+            fig.savefig(self.raw_path + '/' + SaveFile + '_' + str(t) + '.png',dpi=300)
+            if self.Log: 
+                PrintPercentage(t, self.TimeSteps.size -1 )
+        print(f"\nLaser-Ion-Fronts saved in {self.raw_path}")
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
