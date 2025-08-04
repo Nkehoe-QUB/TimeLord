@@ -208,6 +208,7 @@ class Process():
                         Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
                     else:
                         Axis[axis].append(File.__dict__[attr].grid.data[AxisNames.index(axis)])
+                
 
     
             if Averaged and i == 0:
@@ -225,6 +226,7 @@ class Process():
                     else:
                         Data.append(self.np.array(File.__dict__[attr].data))
 
+        for axis in AxisNames: Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
         Data = self.np.stack(Data, axis=0)  # Stack the data along the first axis (time)
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
@@ -264,18 +266,20 @@ class Process():
                 Colours = None
             else: Colours = [Colours]
         if E_las:
+            print(f"Getting {E_las} data")
             E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, dx=dx, dy=dy)
         elif E_avg:
+            print(f"Getting averaged {E_avg} data")
             E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Averaged=True, dx=dx, dy=dy)
 
         den_to_plot={}
         axis={}
         TempFile=File if File is not None else "density"
         if Species:
-            Diag = "Derived_Number_Density"
             d_max = {type:0 for type in Species}
             for type in Species:
-                den_to_plot[type], axis[type] = self.GetData(Diag, type, self.space_axis, dx=dx, dy=dy)
+                print(f"Getting {type} data")
+                den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, dx=dx, dy=dy)
                 d_max[type] = CBMax if CBMax is not None else round_up_scientific_notation(self.np.max(den_to_plot[type]))
         
         if Species: print(f"\nPlotting {Species} densities")
@@ -348,4 +352,55 @@ class Process():
         print(f"\nDensities saved in {self.raw_path}")
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, FinalFile, SaveFile)
+            print(f"\nMovies saved in {self.pros_path}")
+        
+    def SpectraPlot(self, Species=[], XMax=None, YMin=None, YMax=None, File=None, Z=None, Avereraged=True, DataOnly=False):
+        if not Species:
+            raise ValueError("No species were provided")
+        if not isinstance(Species, list):
+            Species = [Species]
+        spect_to_plot={}
+        axis={}
+        label={}
+        TempFile=File if File is not None else "energies"
+        x_max = 0
+        for type in Species:
+            spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], Z=Z)
+            label[type] = type
+        
+        if DataOnly:
+            return {type: spect_to_plot[type] for type in Species}, axis
+        
+        print(f"\nPlotting {Species} spectra")
+        x_max={type:0 for type in Species}
+        y_max={type:0 for type in Species}
+        for type in Species:
+            print(f"Getting {type} data")
+            for i in range(self.LenSim):
+                if Avereraged:
+                    spect_to_plot[type][i] = MovingAverage(spect_to_plot[type][i], 3)
+                if self.np.nanmax(axis[type]['ekin'][i]) > x_max[type]:
+                    x_max[type] = self.np.nanmax(axis[type]['ekin'][i])
+                if self.np.nanmax(spect_to_plot[type][i]) > y_max[type]:
+                    y_max[type] = round_up_scientific_notation(self.np.nanmax(spect_to_plot[type][i]))
+        
+        fig, ax = self.plt.subplots(num=2,clear=True, figsize=(8,6))
+        for i in range(self.LenSim):
+            ax.clear()
+            for type in Species:
+                SaveFile=TempFile if File is not None else f"{type}_" + TempFile
+                ax.plot(axis[type]['ekin'][i], spect_to_plot[type][i], label=f"{label[type]}")
+            
+            ax.set(xlabel='E [$MeV$]', xlim=(0,x_max[type] if XMax is None else XMax),
+                   ylabel='dNdE [arb. units]', ylim=(y_max[type]/1e10 if YMin is None else YMin, y_max[type] if YMax is None else YMax), yscale='log',
+                   title=f"{axis[type]['Time'][i]:.2f}fs")
+            ax.grid(True)
+            ax.legend()
+            fig.tight_layout()
+            self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
+            if self.Log: 
+                PrintPercentage(i, self.LenSim -1 )
+        print(f"\nSpectra saved in {self.raw_path}")
+        if self.Movie:
+            MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
