@@ -219,21 +219,20 @@ class Process():
                     if reduce:
                         Den = self.np.where(Den == 0, self.np.nan, Den)  # Replace zeros with NaN to avoid division by zero
                         with self.np.errstate(invalid='ignore'):
-                            Data.append(self.block_reduce((Den / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean))
+                            Den = self.block_reduce((Den / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean)
                     else:
-                        Data.append(Den / Gamma)
+                        Den = Den / Gamma
                 else:
                     if reduce:
                         if self.Test: print(f"Got Data shape: {Den.shape}")
                         Den = self.np.where(Den == 0, self.np.nan, Den)
                         with self.np.errstate(invalid='ignore'):
-                            Data.append(self.block_reduce((Den[:nx * dx, :ny * dy]), (dx, dy), self.np.nanmean))
+                            Den = self.block_reduce((Den[:nx * dx, :ny * dy]), (dx, dy), self.np.nanmean)
                         if self.Test: print(f"Reduced Data shape: {Data[-1].shape}")
-                    else:
-                        Data.append(Den)
+                Data.append(Den)
 
         for axis in AxisNames: Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
-        Data = self.np.stack(Data, axis=0)  # Stack the data along the first axis (time)
+        Data = self.np.array(Data)  # Stack the data along the first axis (time)
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
         elif Diag == "Electric_Field":
