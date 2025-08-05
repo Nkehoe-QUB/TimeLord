@@ -194,14 +194,14 @@ class Process():
                 if axis == "Time":
                     Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
                 elif axis == "x":
-                    Axis["x"] = File.Grid_Grid_mid.data[AxisNames.index(axis)]
+                    Axis["x"] = File.Grid_Grid_mid.data[AxisNames.index(axis)] / self.micro
                     if reduce:
                         nx = Axis["x"].shape[0] // dx
                         Axis["x"] = Axis["x"][:nx * dx:dx]
                     SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
                     if self.Test: print(f"Removed axis: {axis} from AxisNames")
                 elif axis == "y":
-                    Axis["y"] = File.Grid_Grid_mid.data[AxisNames.index(axis)]
+                    Axis["y"] = File.Grid_Grid_mid.data[AxisNames.index(axis)] / self.micro
                     if reduce:
                         ny = Axis["y"].shape[0] // dy
                         Axis["y"] = Axis["y"][:ny * dy:dy]
