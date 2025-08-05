@@ -193,23 +193,22 @@ class Process():
                     continue
                 if axis == "Time":
                     Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
-                else:
-                    Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
-                if axis == "x":
-                    Axis["x"] = Axis["x"][0]
+                elif axis == "x":
+                    Axis["x"] = File.Grid_Grid_mid.data[AxisNames.index(axis)]
                     if reduce:
                         nx = Axis["x"].shape[0] // dx
                         Axis["x"] = Axis["x"][:nx * dx:dx]
                     SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
                     if self.Test: print(f"Removed axis: {axis} from AxisNames")
-                if axis == "y":
-                    Axis["y"] = Axis["y"][0]
+                elif axis == "y":
+                    Axis["y"] = File.Grid_Grid_mid.data[AxisNames.index(axis)]
                     if reduce:
                         ny = Axis["y"].shape[0] // dy
                         Axis["y"] = Axis["y"][:ny * dy:dy]
                     SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
                     if self.Test: print(f"Removed axis: {axis} from AxisNames")
-            
+                else:
+                    Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
 
             if Averaged and i == 0:
                 Data.append(self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0])))
@@ -237,11 +236,7 @@ class Process():
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
         elif Diag == "Electric_Field":
-            self.max_number = float('-inf')  # Initialize max_number to negative infinity
-            for array in Data:
-                current_max = self.np.max(array)
-                if current_max > self.max_number:
-                    self.max_number = current_max
+            self.max_number = self.np.nanmax(Data)
 
         if "ekin" in AxisNames:
             if "carbon" in Name:
