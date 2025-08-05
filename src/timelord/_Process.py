@@ -172,9 +172,9 @@ class Process():
             print(f"Reducing data by a factor of {dx} in x and {dy} in y")
         else:
             reduce = False
-        AxisNames.append("Time")  # Add time axis
+        if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
-        Axis = {axis: self.np.array(()) for axis in AxisNames}
+        Axis = {axis: [] for axis in AxisNames}
         attr = Diag + "_" + Name
         if Averaged:
             attr += "_averaged"
@@ -182,56 +182,57 @@ class Process():
             raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
 
         Data = []
+        SkipAxis = []
         for i, File in enumerate(self.Files):
             if self.Test: print(f"Processing file {i:04d}.sdf")
             
             for axis in AxisNames:
                 if self.Test: print(f"Processing axis: {axis}")
-                if i == 0:
-                    if axis in ["x", "y", "z"]:
-                        Axis[axis] = self.np.array(getattr(File, attr).grid.data[AxisNames.index(axis)]) / self.micro  # Convert to micrometers
-                        if reduce:
-                            if axis == "x":
-                                nx = Axis["x"].shape[0] // dx
-                                Axis["x"] = Axis["x"][:nx * dx:dx]
-                            elif axis == "y":
-                                ny = Axis["y"].shape[0] // dy
-                                Axis["y"] = Axis["y"][:ny * dy:dy]
-                    elif axis == "Time":
-                        Axis[axis] = [float(File.Header["time"]) / self.femto - self.t0]  # Convert time to femtoseconds and add t0
-                    else:
-                        Axis[axis] = [File.__dict__[attr].grid.data[AxisNames.index(axis)]]
+                if axis in SkipAxis:
+                    if self.Test: print(f"Skipping axis: {axis} as it is already processed")
+                    continue
+                if axis == "Time":
+                    Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
+                else:
+                    Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
+                if axis == "x":
+                    Axis["x"] = Axis["x"][0]
+                    if reduce:
+                        nx = Axis["x"].shape[0] // dx
+                        Axis["x"] = Axis["x"][:nx * dx:dx]
+                    SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
+                    if self.Test: print(f"Removed axis: {axis} from AxisNames")
+                if axis == "y":
+                    Axis["y"] = Axis["y"][0]
+                    if reduce:
+                        ny = Axis["y"].shape[0] // dy
+                        Axis["y"] = Axis["y"][:ny * dy:dy]
+                    SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
+                    if self.Test: print(f"Removed axis: {axis} from AxisNames")
+            
 
-                elif i > 0 and axis not in ["x", "y", "z"]:
-                    if self.Test: print(f"Appending data to axis: {axis}, index: {AxisNames.index(axis)}")
-                    if axis == "Time":
-                        Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
-                    else:
-                        Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
-                
             if Averaged and i == 0:
                 Data.append(self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0])))
                 print("Skipped averaging for the first file")
             else:
-                Den = self.np.array(getattr(File, attr).data)
+                Den = getattr(File, attr).data
                 if Name == "rel electron density":
-                    Gamma = 1 + (self.np.array(Data.Derived_Average_Particle_Energy_electron.data) / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                    Gamma = 1 + (Data.Derived_Average_Particle_Energy_electron.data / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                    Den = Den / Gamma
                     if reduce:
                         Den = self.np.where(Den == 0, self.np.nan, Den)  # Replace zeros with NaN to avoid division by zero
                         with self.np.errstate(invalid='ignore'):
-                            Den = self.block_reduce((Den / Gamma)[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean)
-                    else:
-                        Den = Den / Gamma
+                            Den = self.block_reduce(Den[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean)
                 else:
                     if reduce:
                         if self.Test: print(f"Got Data shape: {Den.shape}")
                         Den = self.np.where(Den == 0, self.np.nan, Den)
                         with self.np.errstate(invalid='ignore'):
-                            Den = self.block_reduce((Den[:nx * dx, :ny * dy]), (dx, dy), self.np.nanmean)
+                            Den = self.block_reduce(Den[:nx * dx, :ny * dy], (dx, dy), self.np.nanmean)
                         if self.Test: print(f"Reduced Data shape: {Data[-1].shape}")
                 Data.append(Den)
 
-        for axis in AxisNames: Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
+        for axis in Axis.keys(): Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
         Data = self.np.array(Data)  # Stack the data along the first axis (time)
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
