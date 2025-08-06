@@ -115,38 +115,6 @@ class Process():
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2
         self.Dim = len(self.sh.getdata(self.os.path.join(self.SimulationPath, '0000.sdf'), verbose=False).__dict__['Electric_Field_Ey'].dims)
         self.space_axis = self.space_axis[:self.Dim]
-        # self.Box = {}
-        # self.Res = {}
-        # self.Area = 1.
-        # Message += '\nGeometry: '
-        # AreaText = ''
-        # self.Box['x'] = float(self.Simulation.namelist.Main.grid_length[0])*self.L_r
-        # self.Res['x'] = float(self.Simulation.namelist.Main.cell_length[0])*self.L_r
-        # AreaText = str(self.np.round(self.Box['x']/self.micro, 2))
-        # if "cartesian" in self.Simulation.namelist.Main.geometry:
-        #     Message += 'Cartesian'
-        #     self.Geo = "Car"
-        #     self.Dim = int(self.Simulation.namelist.Main.geometry.split('D')[0])
-        #     Message += f'\t\tDimensions: {self.Dim}\n'
-        #     if self.Dim > 1:
-        #         self.Box['y'] = float(self.Simulation.namelist.Main.grid_length[1])*self.L_r
-        #         self.Res['y'] = float(self.Simulation.namelist.Main.cell_length[1])*self.L_r
-        #         AreaText = AreaText + 'x' + str(self.np.round(self.Box['y']/self.micro, 2))
-        #     if self.Dim > 2:
-        #         self.Box['z'] = float(self.Simulation.namelist.Main.grid_length[2])*self.L_r
-        #         self.Res['z'] = float(self.Simulation.namelist.Main.cell_length[2])*self.L_r
-        #         AreaText = AreaText + 'x' + str(self.np.round(self.Box['z']/self.micro, 2))
-        #     for i in self.Box.keys(): self.Area *= self.Box[i]/self.micro
-        # elif "cylindrical" in self.Simulation.namelist.Main.geometry:
-        #     self.Geo = "Cyl"
-        #     self.Dim = 3
-        #     self.Modes = int(self.Simulation.namelist.Main.number_of_AM)
-        #     Message += f'Cylindrical\t\tDimensions: 3\tModes: {self.Modes}\n'
-        #     self.Box['r'] = float(self.Simulation.namelist.Main.grid_length[1])*self.L_r
-        #     self.Res['r'] = float(self.Simulation.namelist.Main.cell_length[1])*self.L_r
-        #     AreaText = AreaText + 'x' + str(self.np.round(self.Box['r']/self.micro, 2))
-        #     self.Area = (self.Box['x']/self.micro) * ((self.Box['r']/self.micro)**2)
-        # Message += f'\nBox size is \033[1;33m{AreaText}\033[0m micrometers\n'
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*self.np.sqrt(self.np.log(2)))))/self.femto
         if Ped is not None: 
             print("\nAdding Ped to t0")
@@ -192,7 +160,7 @@ class Process():
                     if self.Test: print(f"Skipping axis: {axis} as it is already processed")
                     continue
                 if axis == "Time":
-                    Axis[axis].append(float(File.Header["time"]) / self.femto - self.t0)  # Convert time to femtoseconds and add t0
+                    Axis[axis].append(round(float(File.Header["time"]) / self.femto - self.t0, 2))  # Convert time to femtoseconds and add t0
                 elif axis == "x":
                     Axis["x"] = File.Grid_Grid_mid.data[AxisNames.index(axis)] / self.micro
                     if reduce:
@@ -412,7 +380,7 @@ class Process():
             
             ax.set(xlabel='E [$MeV$]', xlim=(0,x_max[type] if XMax is None else XMax),
                    ylabel='dNdE [arb. units]', ylim=(y_max[type]/1e10 if YMin is None else YMin, y_max[type] if YMax is None else YMax), yscale='log',
-                   title=f"{axis[type]['Time'][i]:.2f}fs")
+                   title=f"{axis[type]['Time'][i]}fs")
             ax.grid(True)
             ax.legend()
             fig.tight_layout()
@@ -424,6 +392,120 @@ class Process():
             MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
     
+    def AnglePlot(self, Species=[], CBMin=None, CBMax=None, XMax=None, YMin=None, YMax=None, LasAngle=None, Integrate=None, File=None, DataOnly=False, Z=None):
+        if not Species:
+            raise ValueError("No species were provided")
+        if not isinstance(Species, list):
+            Species = [Species]
+        if not isinstance(XMax, list):
+            if XMax is not None:
+                XMax = [XMax]
+        if XMax is not None:
+            if len(XMax) < len(Species) and len(XMax) != 1:
+                raise ValueError("XMax must be a list of the same length as Species or a single value")
+        if YMin is not None and YMin < -self.np.pi:
+            YMin = self.np.radians(YMin)
+        if YMax is not None and YMax > self.np.pi:
+            YMax = self.np.radians(YMax)
+        if YMin is None:
+            if YMax is not None:
+                YMin = -YMax
+        else:
+            if YMax is None:
+                if YMin > 0:
+                    YMin = -YMin
+                YMax = -YMin
+        angle_to_plot={}
+        axis={}
+        label={}
+        InitalFile=0
+        TempFile=File if File is not None else "angles"
+        for type in Species:
+            angle_to_plot[type], axis[type] = self.GetData("dist_fn_xy_energy", type, ['ekin', 'theta'], Z=Z)
+            label[type] = type
+
+        if DataOnly:
+            if len(Species) == 1:
+                if self.Test: print(f"Only one species provided: {Species[0]}")
+                return angle_to_plot[Species[0]], axis[Species[0]]
+            else:
+                if self.Test: print(f"Multiple species provided: {Species}")
+                to_return = {}
+                for type in Species:
+                    to_return[type] = {'data': angle_to_plot[type], 'axis': axis[type]}
+                return to_return
+        
+        print(f"\nPlotting {Species} angles")
+        EMax=[]
+        for type in Species:
+            x_max=0
+            for i in range(self.LenSim):
+                if self.np.max(axis[type]['ekin'][i]) > x_max:
+                    x_max = self.np.max(axis[type]['ekin'][i][~self.np.isnan(axis[type]['ekin'][i])])
+            EMax.append(x_max)
+        if len(Species) == 1:
+            fig, ax = self.plt.subplots(num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
+            type = Species[0]
+            for i in range(self.LenSim):
+                ax.clear()
+                SaveFile=TempFile if File is not None else f"{type}_" + TempFile
+                try: cax = ax.pcolormesh(axis[type]['theta'],axis[type]['ekin'][i], angle_to_plot[type][i].T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+                except ValueError: 
+                    InitalFile+=1
+                    print(f"Skipping {axis[type]['Time'][i]}fs")
+                    continue
+                cbar = fig.colorbar(cax, aspect=50)
+                cbar.set_label('dNdE [arb. units]')
+                if LasAngle is not None:
+                    ax.vlines(self.np.radians(LasAngle), 0, EMax[Species.index(type)], colors='r', linestyles='dashed')
+                if Integrate is not None:
+                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, EMax[Species.index(type)], axis[type]['ekin'][i].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                    else: ax.fill_betweenx(self.np.linspace(0, EMax[Species.index(type)], axis[type]['ekin'][i].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
+                ax.set(xlim=(-self.np.pi if YMin is None else YMin,self.np.pi if YMax is None else YMax),
+                        ylim=(0,EMax[0] if XMax is None else XMax[0]),
+                        title=f"{label[type]}")
+                if YMax is None or YMax > self.np.pi/2:
+                    ax.set_rlabel_position(90)
+                fig.suptitle(f"{axis[type]['Time'][i]}fs")
+                fig.tight_layout()
+                self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
+                cbar.remove()
+                if self.Log: 
+                    PrintPercentage(i, self.LenSim - 1)
+        else:
+            fig, ax = self.plt.subplots(ncols=len(Species), num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8*len(Species),6))
+            for i in range(self.LenSim):
+                for a in ax: a.clear()
+                for type in Species:
+                    SaveFile=TempFile if File is not None else f"{type}_" + TempFile
+                    try: cax = ax[Species.index(type)].pcolormesh(axis[type]['theta'],axis[type]['ekin'][i], angle_to_plot[type][i], cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+                    except ValueError:
+                        if type == Species[0]: 
+                            InitalFile+=1
+                        continue
+                    if type == Species[-1]:
+                        cbar = fig.colorbar(cax, aspect=50)
+                        cbar.set_label('dNdE [arb. units]')
+                    if LasAngle is not None:
+                        ax[Species.index(type)].vlines(self.np.radians(LasAngle), 0, EMax[Species.index(type)], colors='r', linestyles='dashed')
+                    if Integrate is not None:
+                        if LasAngle is not None: ax[Species.index(type)].fill_betweenx(self.np.linspace(0, EMax[Species.index(type)], axis[type]['ekin'][i].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                        else: ax[Species.index(type)].fill_betweenx(self.np.linspace(0, EMax[Species.index(type)], axis[type]['ekin'][i].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
+                    ax[Species.index(type)].set(xlim=(-self.np.pi if YMin is None else YMin,self.np.pi if YMax is None else YMax),
+                                                ylim=(0,EMax[Species.index(type)] if XMax is None else (XMax[0] if len(XMax) ==1 else XMax[Species.index(type)])),
+                                                title=f"{label[type]}")
+            
+                fig.suptitle(f"{axis[type]['Time'][i]}fs")
+                fig.tight_layout()
+                self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
+                cbar.remove()
+                if self.Log: 
+                    PrintPercentage(i, self.LenSim - 1)
+        print(f"\nAngles saved in {self.raw_path}")
+        if self.Movie:
+            MakeMovie(self.raw_path, self.pros_path, InitalFile, self.LenSim, SaveFile)
+            print(f"\nMovies saved in {self.pros_path}")
+
     def LasIonFrontPlot(self, FSpot=1.0, EMax=None, XMin=None, XMax=None, dx=1, dy=1, File=None):
         SaveFile=File if File is not None else "Las_Ion_Front"
         data = {}
@@ -431,15 +513,12 @@ class Process():
         print(f"\nGetting data")
         if self.Log: 
             PrintPercentage(0, 3 )
-        tmp = self.DensityPlot('electron', dx=dx, dy=dy, DataOnly=True)['electron']
-        data['electron'], axis['electron'] = tmp['data'], tmp['axis']
-        if self.Log: 
-            PrintPercentage(1, 3 )
-        data['proton'], axis['proton'] = self.GetData('dist_fn_x_energy', 'proton', ['x', 'ekin'])
+        tmp = self.DensityPlot('electron', E_avg='Ex', dx=dx, dy=dy, DataOnly=True)
+        data['electron'], axis['electron'] = tmp['electron']['data'], tmp['electron']['axis']
+        data['ex'], axis['ex'] = tmp['ex']['data'], tmp['ex']['axis']
         if self.Log: 
             PrintPercentage(2, 3 )
-        tmp = self.DensityPlot(E_avg='Ex', dx=dx, dy=dy, DataOnly=True)['Ex']
-        data['ex'], axis['ex'] = tmp['data'], tmp['axis']
+        data['proton'], axis['proton'] = self.GetData('dist_fn_x_energy', 'proton', ['x', 'ekin'])
         if self.Log: 
             PrintPercentage(3, 3 )
         print(f"\nData loaded")
