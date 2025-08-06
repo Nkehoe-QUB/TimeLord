@@ -381,9 +381,16 @@ class Process():
             label[type] = type
         
         if DataOnly:
-            return {type: spect_to_plot[type] for type in Species}, axis
-        
-        print(f"\nPlotting {Species} spectra")
+            if len(Species) == 1:
+                if self.Test: print(f"Only one species provided: {Species[0]}")
+                return spect_to_plot[Species[0]], axis[Species[0]]
+            else:
+                if self.Test: print(f"Multiple species provided: {Species}")
+                to_return = {}
+                for type in Species:
+                    to_return[type] = {'data': spect_to_plot[type], 'axis': axis[type]}
+                return to_return
+
         x_max={type:0 for type in Species}
         y_max={type:0 for type in Species}
         for type in Species:
