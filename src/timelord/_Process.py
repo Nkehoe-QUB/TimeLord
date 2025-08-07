@@ -153,6 +153,8 @@ class Process():
         SkipAxis = []
         for i, File in enumerate(self.Files):
             if self.Test: print(f"Processing file {i:04d}.sdf")
+            if self.Log: 
+                PrintPercentage(i, self.LenSim - 1)
             
             for axis in AxisNames:
                 if self.Test: print(f"Processing axis: {axis}")
