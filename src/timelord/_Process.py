@@ -177,6 +177,10 @@ class Process():
                         Axis["y"] = Axis["y"][:ny * dy:dy]
                     SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
                     if self.Test: print(f"Removed axis: {axis} from AxisNames")
+                elif axis == "theta":
+                    Axis[axis] = getattr(File, attr).grid.data[AxisNames.index(axis)]
+                    SkipAxis.append(axis)  # Remove axis from AxisNames to avoid duplication
+                    if self.Test: print(f"Removed axis: {axis} from AxisNames")
                 else:
                     Axis[axis].append(getattr(File, attr).grid.data[AxisNames.index(axis)])
 
@@ -423,7 +427,7 @@ class Process():
         InitalFile=0
         TempFile=File if File is not None else "angles"
         for type in Species:
-            angle_to_plot[type], axis[type] = self.GetData("dist_fn_xy_energy", type, ['ekin', 'theta'], Z=Z)
+            angle_to_plot[type], axis[type] = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Z=Z)
             label[type] = type
 
         if DataOnly:
