@@ -68,7 +68,7 @@ class Process():
         if self.LenSim == 0:
             raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
         else: Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
-        self.Files = [self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False) for i in range(self.LenSim)]
+        # self.Files = [self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False) for i in range(self.LenSim)]
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
@@ -146,15 +146,17 @@ class Process():
         attr = Diag + "_" + Name
         if Averaged:
             attr += "_averaged"
-        if not hasattr(self.Files[0], attr):
-            raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
 
         Data = []
         SkipAxis = []
-        for i, File in enumerate(self.Files):
+        for i in range(self.LenSim):
             if self.Test: print(f"Processing file {i:04d}.sdf")
+            File = self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False)
             if self.Log: 
                 PrintPercentage(i, self.LenSim - 1)
+            if i == 0 and not hasattr(File, attr):
+                raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
+
             
             for axis in AxisNames:
                 if self.Test: print(f"Processing axis: {axis}")
