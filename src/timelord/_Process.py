@@ -427,6 +427,7 @@ class Process():
         InitalFile=0
         TempFile=File if File is not None else "angles"
         for type in Species:
+            if self.Log: print(f"\nGetting {type} data")
             angle_to_plot[type], axis[type] = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Z=Z)
             label[type] = type
 
@@ -446,9 +447,10 @@ class Process():
         for type in Species:
             x_max=0
             for i in range(self.LenSim):
-                if self.np.max(axis[type]['ekin'][i]) > x_max:
-                    x_max = self.np.max(axis[type]['ekin'][i][~self.np.isnan(axis[type]['ekin'][i])])
+                if self.np.nanmax(axis[type]['ekin'][i]) > x_max:
+                    x_max = self.np.nanmax(axis[type]['ekin'][i])
             EMax.append(x_max)
+            if self.Test: print(f"Max energy for {type} is {x_max}")
         if len(Species) == 1:
             fig, ax = self.plt.subplots(num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
             type = Species[0]
