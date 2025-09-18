@@ -74,6 +74,8 @@ class Process():
             else:
                 ConvData = False
                 Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+        else: 
+            ConvData = True
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
             for i in range(self.LenSim):
