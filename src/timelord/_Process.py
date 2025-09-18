@@ -147,7 +147,7 @@ class Process():
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
 
-    def GetData(self, Diag, Name, AxisNames, t, Averaged=False, Z=None):
+    def GetData(self, Diag, Name, AxisNames, t, dx=0, dy=0, Averaged=False, Z=None):
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
         Axis = {axis: [] for axis in AxisNames}
@@ -169,8 +169,22 @@ class Process():
                 Axis['Time'] = round(float(File["SDF/Header/time"][()]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
             elif axis == "x":
                 Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
+                if dx != 1:
+                    if dx == 0:
+                        dx = 4 if self.np.diff(Axis['x'][self.np.s_[::4]])[0] < 100e-3 else 2
+                    elif self.np.diff(Axis['x'][self.np.s_[::dx]])[0] > 100e-3:
+                        print(f"Warning: dx = {dx} is too large. Setting dx = 4")
+                        dx = 4
+                    Axis["x"] = Axis["x"][self.np.s_[::dx]]
             elif axis == "y":
                 Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
+                if dy != 1:
+                    if dy == 0:
+                        dy = 4 if self.np.diff(Axis['y'][self.np.s_[::4]])[0] < 100e-3 else 2
+                    elif self.np.diff(Axis['y'][self.np.s_[::dy]])[0] > 100e-3:
+                        print(f"Warning: dy = {dy} is too large. Setting dy = 4")
+                        dy = 4
+                    Axis["y"] = Axis["y"][self.np.s_[::dy]]
             else:
                 Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
 
@@ -179,14 +193,14 @@ class Process():
             print("Skipped averaging for the first file")
         else:
             Den = File[f"SDF/{attr}"][:]
+            if dx != 1:
+                Den = Den[self.np.s_[::dx, ::dy]]
             if Name == "rel electron density":
-                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:]
+                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][self.np.s_[::dx, ::dy]]
                 Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                 Den = Den / Gamma
             Data = Den
 
-        for axis in Axis.keys(): Axis[axis] = self.np.array(Axis[axis])  # Convert to numpy array
-        Data = self.np.array(Data)  # Stack the data along the first axis (time)
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
         # elif Diag == "Electric_Field":
@@ -207,7 +221,7 @@ class Process():
         return Data, Axis
 
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, Timestep=None, EMax=None, Colours=None, CBMin=None, CBMax=None, File=None, DataOnly=False):
+    def DensityPlot(self, Species=[], E_las=False, E_avg=False, Timestep=None, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False):
         if not Species and (E_las and E_avg) is None:
             raise ValueError("No species or field were provided")
         if Species and not isinstance(Species, list):
@@ -243,12 +257,12 @@ class Process():
             axis={}
             ax.clear()
             if E_las:
-                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, i)
+                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, i, dx=dx, dy=dy)
             elif E_avg:
-                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, i, Averaged=True)
+                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
-                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, i)
+                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, i, dx=dx, dy=dy)
             if DataOnly:
                 if Species:
                     for type in Species:
@@ -263,7 +277,7 @@ class Process():
                     to_return[E_avg]['data'].append(E_data)
                     for k, v in E_axis.items():
                         to_return[E_avg]['axis'][k].append(v)
-                if self.Log: 
+                if self.Log and Timestep is None: 
                     PrintPercentage(i, self.LenSim -1 )
                 continue
 
