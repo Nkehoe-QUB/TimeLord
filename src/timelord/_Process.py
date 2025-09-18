@@ -238,7 +238,7 @@ class Process():
             if E_avg: to_include.append(E_avg)
             to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in to_include}
 
-        for i in range(self.LenSim if Timestep is None else Timestep):
+        for i in range(0 if Timestep is None else Timestep, self.LenSim if Timestep is None else Timestep+1):
             den_to_plot={}
             axis={}
             ax.clear()
