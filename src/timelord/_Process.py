@@ -172,7 +172,7 @@ class Process():
             elif axis == "y":
                 Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
             else:
-                Axis[axis] = File[f"SDF/Grid_{Grid_ID}/axis{AxisNames.index(axis)}"][:]
+                Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
@@ -203,7 +203,7 @@ class Process():
                 raise ValueError("Species not recognised or number of nucleons (Z) not provided")
             Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
         
-        File.close() if self.Use_H5 else None
+        File.close()
         return Data, Axis
 
 
@@ -509,9 +509,13 @@ class Process():
             spect_to_plot[type], axis[type] = tmp[0], tmp[1]
 
         if DataOnly:
+            if len(Angles) > 1:
+                raise ValueError("DataOnly can only be used with a single angle")
+            A_arg = self.np.argwhere(abs(axis[type]['theta'][0]-self.np.radians(AngleOffset))<=self.np.radians(Angles[0]))
             if len(Species) == 1:
-                return spect_to_plot[Species[0]], axis[Species[0]]
-            return {type : {'data': spect_to_plot[type], 'axis': axis[type]} for type in Species}
+                return self.np.reshape(self.np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1])), axis[Species[0]]
+                # return spect_to_plot[Species[0]], axis[Species[0]]
+            return {type : {'data': self.np.reshape(self.np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1])), 'axis': axis[type]} for type in Species}
 
         for type in Species:
             if self.Log: print(f"\nPlotting {type} angle energies")
