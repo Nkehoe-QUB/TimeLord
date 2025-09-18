@@ -1,7 +1,7 @@
-from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation
+from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, sdf_to_hdf5
 
 class Process():
-    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False):
+    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True):
         ########### Constants ##################################
         self.c = 299792458. 
         self.me = 9.11e-31
@@ -31,11 +31,13 @@ class Process():
         import matplotlib.gridspec as gridspec
         import pandas as pd
         from collections import defaultdict
+        import h5py
         try:
             import pyfiglet
             Title = True
         except ImportError:
             Title = False
+        self.h5py = h5py
         self.pd = pd
         self.os = os
         self.sh = sdf_helper
@@ -66,9 +68,20 @@ class Process():
 
         self.LenSim = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
         if self.LenSim == 0:
-            raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
-        else: Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
-        # self.Files = [self.sh.getdata(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), verbose=False) for i in range(self.LenSim)]
+            self.LenSim = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.h5')])
+            if self.LenSim == 0:
+                raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+            else:
+                ConvData = False
+                Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+        if ConvData:
+            if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
+            for i in range(self.LenSim):
+                if self.Test: print(f"Converting file {i:04d}.sdf to HDF5")
+                sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
+                if self.Log: PrintPercentage(i, self.LenSim -1 )
+            Message = "\n\n" + Message
+        Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
@@ -104,16 +117,16 @@ class Process():
                 if l_found and t_found and x_found:
                     break
             if lmatch is None:
-                raise ValueError("\033[1;31mlambda_las or lambda0 not found in simulation file\033[0m")
+                print("\033[1;31mlambda_las or lambda0 not found in simulation file\033[0m")
             if xmatch is None:
                 print("\033[1;31mxMin not found in simulation file! Setting to 0\033[0m")
                 self.x_spot = 0
             if tmatch is None:
                 print("\033[1;31mtau_fwhm_I not found in simulation file! Setting to 0\033[0m")
                 self.Tau = 0
-        omega_las = 2.*self.np.pi*self.c / lambda_las
-        self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2
-        self.Dim = len(self.sh.getdata(self.os.path.join(self.SimulationPath, '0000.sdf'), verbose=False).__dict__['Electric_Field_Ey'].dims)
+        omega_las = 2.*self.np.pi*self.c / lambda_las if l_found else 1
+        self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
+        self.Dim = len(self.h5py.File(self.os.path.join(self.SimulationPath, '0000.h5'), 'r')["SDF/Electric_Field_Ey"].attrs.get("dims"))
         self.space_axis = self.space_axis[:self.Dim]
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*self.np.sqrt(self.np.log(2)))))/self.femto
         if Ped is not None: 
@@ -141,33 +154,32 @@ class Process():
             attr += "_averaged"
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
-        File = self.sh.getdata(self.os.path.join(self.SimulationPath, f"{t:04d}.sdf"), verbose=False)
-        if t == 0 and not hasattr(File, attr):
+        File = self.h5py.File(self.os.path.join(self.SimulationPath, f"{t:04d}.h5"), 'r')
+        try: File[f"SDF/{attr}"]
+        except KeyError:
+            File.close()
             raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
+        Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
 
         for axis in AxisNames:
             if self.Test: print(f"Processing axis: {axis}")
             if axis == "Time":
-                Axis["Time"] = round(float(File.Header["time"]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
+                Axis['Time'] = round(float(File["SDF/Header/time"][()]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
             elif axis == "x":
-                Axis["x"] = File.Grid_Grid_mid.data[AxisNames.index(axis)] / self.micro
-                if self.Test: print(f"Removed axis: {axis} from AxisNames")
+                Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
             elif axis == "y":
-                Axis["y"] = File.Grid_Grid_mid.data[AxisNames.index(axis)] / self.micro
-                if self.Test: print(f"Removed axis: {axis} from AxisNames")
-            elif axis == "theta":
-                Axis[axis] = getattr(File, attr).grid.data[AxisNames.index(axis)]
-                if self.Test: print(f"Removed axis: {axis} from AxisNames")
+                Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
             else:
-                Axis[axis] = getattr(File, attr).grid.data[AxisNames.index(axis)]
+                Axis[axis] = File[f"SDF/Grid_{Grid_ID}/axis{AxisNames.index(axis)}"][:]
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
             print("Skipped averaging for the first file")
         else:
-            Den = getattr(File, attr).data
+            Den = File[f"SDF/{attr}"][:]
             if Name == "rel electron density":
-                Gamma = 1 + (Data.Derived_Average_Particle_Energy_electron.data / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:]
+                Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                 Den = Den / Gamma
             Data = Den
 
@@ -189,10 +201,11 @@ class Process():
                 raise ValueError("Species not recognised or number of nucleons (Z) not provided")
             Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
         
+        File.close() if self.Use_H5 else None
         return Data, Axis
 
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, File=None, DataOnly=False):
+    def DensityPlot(self, Species=[], E_las=False, E_avg=False, Timestep=None, EMax=None, Colours=None, CBMin=None, CBMax=None, File=None, DataOnly=False):
         if not Species and (E_las and E_avg) is None:
             raise ValueError("No species or field were provided")
         if Species and not isinstance(Species, list):
@@ -223,7 +236,7 @@ class Process():
             if E_avg: to_include.append(E_avg)
             to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in to_include}
 
-        for i in range(self.LenSim):
+        for i in range(self.LenSim if Timestep is None else Timestep):
             den_to_plot={}
             axis={}
             ax.clear()
@@ -310,7 +323,7 @@ class Process():
             fig.tight_layout()
             self.plt.savefig(self.raw_path + "/" + SaveFile + "_" + str(i) + ".png",dpi=200)
             Plotted = True
-            if self.Log: 
+            if self.Log and Timestep is None: 
                 PrintPercentage(i, self.LenSim -1 )
         if DataOnly:
             for type in to_include:
@@ -318,7 +331,7 @@ class Process():
                 for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = self.np.array(to_return[type]['axis'][axis])
             return to_return
         print(f"\nDensities saved in {self.raw_path}")
-        if self.Movie:
+        if self.Movie and Timestep is None:
             MakeMovie(self.raw_path, self.pros_path, 0, FinalFile, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
         
