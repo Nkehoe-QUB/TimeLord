@@ -189,6 +189,7 @@ class Process():
             else:
                 if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
                 else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
+                Axis[axis] = self.np.reshape(Axis[axis], self.np.max(Axis[axis].shape))
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
@@ -429,6 +430,8 @@ class Process():
         if XMax is not None:
             if len(XMax) < len(Species) and len(XMax) != 1:
                 raise ValueError("XMax must be a list of the same length as Species or a single value")
+            if len(XMax) < len(Species) and len(XMax) == 1:
+                XMax = [XMax] * len(Species)
         if YMin is not None and YMin < -self.np.pi:
             YMin = self.np.radians(YMin)
         if YMax is not None and YMax > self.np.pi:
@@ -468,21 +471,21 @@ class Process():
                     continue
                 ax.clear()
                 SaveFile=TempFile if File is not None else f"{type}_" + TempFile
-                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=self.np.nanmax(angle_to_plot)*1e-8 if CBMin is None else CBMin, vmax=self.np.nanmax(angle_to_plot) if CBMax is None else CBMax))
                 except ValueError: 
                     InitalFile+=1
-                    if self.Log: print(f"Skipping {axis['Time'][i]}fs")
+                    if self.Log: print(f"Skipping {axis['Time']}fs")
                     continue
                 cbar = fig.colorbar(cax, aspect=50)
                 cbar.set_label('dNdE [arb. units]')
-                XMax = self.np.nanmax(axis['ekin'] ) if XMax is None else XMax
+                xmax = self.np.nanmax(axis['ekin'] ) if XMax is None else XMax[Species.index(type)]
                 if LasAngle is not None:
-                    ax.vlines(self.np.radians(LasAngle), 0, XMax, colors='r', linestyles='dashed')
+                    ax.vlines(self.np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
                 if Integrate is not None:
-                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, XMax, axis['ekin'].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
-                    else: ax.fill_betweenx(self.np.linspace(0, XMax, axis['ekin'].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
+                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                    else: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
                 ax.set(xlim=(-self.np.pi if YMin is None else YMin,self.np.pi if YMax is None else YMax),
-                        ylim=(0,XMax))
+                        ylim=(0,xmax))
                 if YMax is None or YMax > self.np.pi/2:
                     ax.set_rlabel_position(90)
                 fig.suptitle(f"{axis['Time']}fs")
