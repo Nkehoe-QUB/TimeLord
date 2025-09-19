@@ -128,7 +128,8 @@ class Process():
                 self.Tau = 0
         omega_las = 2.*self.np.pi*self.c / lambda_las if l_found else 1
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
-        self.Dim = len(self.h5py.File(self.os.path.join(self.SimulationPath, '0000.h5'), 'r')["SDF/Electric_Field_Ey"].attrs.get("dims"))
+        with self.h5py.File(self.os.path.join(self.SimulationPath, '0000.h5'), 'r') as file:
+            self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
         self.space_axis = self.space_axis[:self.Dim]
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*self.np.sqrt(self.np.log(2)))))/self.femto
         if Ped is not None: 
@@ -186,7 +187,8 @@ class Process():
                         dy = 4
                     Axis["y"] = Axis["y"][self.np.s_[::dy]]
             else:
-                Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
+                if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
+                else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
