@@ -80,7 +80,10 @@ class Process():
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
             for i in range(self.LenSim):
                 if self.Test: print(f"Converting file {i:04d}.sdf to HDF5")
-                sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
+                try: sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
+                except Exception as e:
+                    if self.Log: print(f"Error converting file {i:04d}.sdf to HDF5: {e}")
+                    continue
                 if self.Log: PrintPercentage(i, self.LenSim -1 )
             Message = "\n\n" + Message
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
@@ -189,7 +192,6 @@ class Process():
             else:
                 if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
                 else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
-                Axis[axis] = self.np.reshape(Axis[axis], self.np.max(Axis[axis].shape))
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
@@ -430,8 +432,6 @@ class Process():
         if XMax is not None:
             if len(XMax) < len(Species) and len(XMax) != 1:
                 raise ValueError("XMax must be a list of the same length as Species or a single value")
-            if len(XMax) < len(Species) and len(XMax) == 1:
-                XMax = [XMax] * len(Species)
         if YMin is not None and YMin < -self.np.pi:
             YMin = self.np.radians(YMin)
         if YMax is not None and YMax > self.np.pi:
@@ -471,21 +471,21 @@ class Process():
                     continue
                 ax.clear()
                 SaveFile=TempFile if File is not None else f"{type}_" + TempFile
-                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=self.np.nanmax(angle_to_plot)*1e-8 if CBMin is None else CBMin, vmax=self.np.nanmax(angle_to_plot) if CBMax is None else CBMax))
+                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
                 except ValueError: 
                     InitalFile+=1
-                    if self.Log: print(f"Skipping {axis['Time']}fs")
+                    if self.Log: print(f"Skipping {axis['Time'][i]}fs")
                     continue
                 cbar = fig.colorbar(cax, aspect=50)
                 cbar.set_label('dNdE [arb. units]')
-                xmax = self.np.nanmax(axis['ekin'] ) if XMax is None else XMax[Species.index(type)]
+                XMax = self.np.nanmax(axis['ekin'] ) if XMax is None else XMax
                 if LasAngle is not None:
-                    ax.vlines(self.np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
+                    ax.vlines(self.np.radians(LasAngle), 0, XMax, colors='r', linestyles='dashed')
                 if Integrate is not None:
-                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
-                    else: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
+                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, XMax, axis['ekin'].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                    else: ax.fill_betweenx(self.np.linspace(0, XMax, axis['ekin'].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
                 ax.set(xlim=(-self.np.pi if YMin is None else YMin,self.np.pi if YMax is None else YMax),
-                        ylim=(0,xmax))
+                        ylim=(0,XMax))
                 if YMax is None or YMax > self.np.pi/2:
                     ax.set_rlabel_position(90)
                 fig.suptitle(f"{axis['Time']}fs")
