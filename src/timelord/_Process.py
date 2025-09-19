@@ -147,7 +147,7 @@ class Process():
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
 
-    def GetData(self, Diag, Name, AxisNames, t, dx=0, dy=0, Averaged=False, Z=None):
+    def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None):
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
         Axis = {axis: [] for axis in AxisNames}
