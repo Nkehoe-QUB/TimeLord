@@ -457,3 +457,53 @@ def sdf_to_hdf5(
     if verbose:
         print(f"Done: {h5_path} (skipped={skipped_count}, deleted={deleted})")
     # return h5_path, deleted, skipped_count
+
+def pick_safe_workers(cap=8) -> int:
+    """
+    Choose a sensible number of worker processes.
+    Priority:
+      1) SLURM_CPUS_PER_TASK / SLURM_JOB_CPUS_PER_NODE (HPC schedulers)
+      2) os.cpu_count() - 1
+    Optionally cap at `cap` to avoid disk thrash.
+    """
+    import os
+    env_keys = ["SLURM_CPUS_PER_TASK", "SLURM_JOB_CPUS_PER_NODE", "NSLOTS"]
+    for k in env_keys:
+        v = os.environ.get(k)
+        if v:
+            try:
+                # SLURM_JOB_CPUS_PER_NODE can look like "8(x2)"; handle simple int first
+                n = int(v)
+                if n > 0:
+                    return max(1, n)
+            except ValueError:
+                # Best-effort parse like "8(x2)" -> 8
+                try:
+                    n = int(v.split("(")[0])
+                    if n > 0:
+                        return max(1, n)
+                except Exception:
+                    pass
+
+    # Fallback to local CPU count minus one
+    local = os.cpu_count() or 2
+    n = max(1, local - 1)
+    if cap is not None:
+        n = min(n, cap)
+    return n
+
+def convert_one(args):
+    """
+    Separate top-level function so it can be pickled by multiprocessing.
+    """
+    import os
+    (i, sim_path, del_data, verbose) = args
+    src = os.path.join(sim_path, f"{i:04d}.sdf")
+    try:
+        # Import inside the worker to avoid pickling issues
+        if verbose:
+            print(f"Converting file {i:04d}.sdf to HDF5")
+        sdf_to_hdf5(src, overwrite=True, verbose=False, delete_original=del_data)
+        return (i, None)  # success
+    except Exception as e:
+        return (i, e)     # failure

@@ -1,4 +1,4 @@
-from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, sdf_to_hdf5
+from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, sdf_to_hdf5, convert_one, pick_safe_workers
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True):
@@ -32,6 +32,7 @@ class Process():
         import pandas as pd
         from collections import defaultdict
         import h5py
+        from concurrent.futures import ProcessPoolExecutor, as_completed
         try:
             import pyfiglet
             Title = True
@@ -66,26 +67,49 @@ class Process():
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
-        self.LenSim = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
-        if self.LenSim == 0:
-            self.LenSim = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.h5')])
-            if self.LenSim == 0:
+        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
+        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.h5')])
+        if LenSDF == 0:
+            if LenHDF == 0:
                 raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
-            else:
-                ConvData = False
-                Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+            ConvData = False
+            self.LenSim = LenHDF
+            Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
         else: 
             ConvData = True
+            self.LenSim = LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
-            for i in range(self.LenSim):
-                if self.Test: print(f"Converting file {i:04d}.sdf to HDF5")
-                try: sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
-                except Exception as e:
-                    if self.Log: print(f"Error converting file {i:04d}.sdf to HDF5: {e}")
-                    continue
-                if self.Log: PrintPercentage(i, self.LenSim -1 )
+            workers = pick_safe_workers()
+            tasks = [(i, self.SimulationPath, DelData, bool(self.Test)) for i in range(self.LenSim)]
+            done = 0
+            last_idx = -1
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                futs = [ex.submit(convert_one, t) for t in tasks]
+                for fut in as_completed(futs):
+                    i, err = fut.result()
+                    if err and self.Log and self.Test:
+                        print(f"Error converting file {i:04d}.sdf to HDF5: {err}")
+                    done += 1
+                    # keep your existing percentage display
+                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                    if idx_equiv != last_idx:
+                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                        last_idx = idx_equiv
+
+
+            # for i in range(self.LenSim):
+            #     if self.Test: print(f"Converting file {i:04d}.sdf to HDF5")
+            #     try: sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
+            #     except Exception as e:
+            #         if self.Log: print(f"Error converting file {i:04d}.sdf to HDF5: {e}")
+            #         continue
+            #     if self.Log: PrintPercentage(i, self.LenSim -1 )
             Message = "\n\n" + Message
+
+
+
+
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
