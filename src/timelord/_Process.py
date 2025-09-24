@@ -216,6 +216,7 @@ class Process():
             else:
                 if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
                 else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
+                Axis[axis] = self.np.reshape(Axis[axis], self.np.max(Axis[axis].shape))
 
         if Averaged and t == 0:
             Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
