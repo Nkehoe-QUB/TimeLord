@@ -273,7 +273,7 @@ class Process():
                 if Species: print(f"\nPlotting {Species} densities")
                 else: print(f"\nPlotting {E_las if E_las else E_avg} field")
         FinalFile = self.LenSim
-        fig, ax = self.plt.subplots(num=1,clear=True, figsize=(8,6))
+        if not DataOnly: fig, ax = self.plt.subplots(num=1,clear=True, figsize=(8,6))
         Plotted = False
         if DataOnly:
             to_include = Species if Species else []
@@ -284,7 +284,7 @@ class Process():
         for i in range(0 if Timestep is None else Timestep, self.LenSim if Timestep is None else Timestep+1):
             den_to_plot={}
             axis={}
-            ax.clear()
+            if not DataOnly: ax.clear()
             if E_las:
                 E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, i, dx=dx, dy=dy)
             elif E_avg:
@@ -394,12 +394,12 @@ class Process():
             else:
                 to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in Species}
         
-        fig, ax = self.plt.subplots(num=2,clear=True, figsize=(8,6))
+        if not DataOnly: fig, ax = self.plt.subplots(num=2,clear=True, figsize=(8,6))
         for i in range(self.LenSim):
             spect_to_plot={}
             axis={}
             label={}
-            ax.clear()
+            if not DataOnly: ax.clear()
             for type in Species:
                 spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], i, Z=Z)
                 if Avereraged:
@@ -480,7 +480,7 @@ class Process():
         InitalFile = 0
         for type in Species:
             if self.Log: print(f"\nPlotting {type} angles")
-            fig, ax = self.plt.subplots(num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
+            if not DataOnly: fig, ax = self.plt.subplots(num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
             for i in range(self.LenSim):
                 angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], i, Z=Z)
                 if DataOnly:
