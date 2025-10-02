@@ -41,6 +41,7 @@ class Process():
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
+        Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
         LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/*.sdf')])
