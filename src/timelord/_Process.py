@@ -1,4 +1,17 @@
-from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, sdf_to_hdf5, convert_one, pick_safe_workers
+import numpy as np
+from cmcrameri import cm as cmaps
+import matplotlib, os, re, glob, h5py, pyfiglet
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+plt.rcParams["axes.labelsize"] = 16
+plt.rcParams["axes.titlesize"] = 16
+plt.rcParams["xtick.labelsize"] = 14
+plt.rcParams["ytick.labelsize"] = 14
+plt.rcParams["legend.fontsize"] = 14
+import matplotlib.colors as cm
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True):
@@ -19,56 +32,19 @@ class Process():
         self.femto = 1e-15
         self.space_axis = ['x', 'y', 'z']
         ########################################################
-        try: import sdf_helper
-        except ImportError:
-            raise ImportError("sdf_helper is not installed")
-        import numpy as np
-        from cmcrameri import cm as cmaps
-        import matplotlib, os, re, glob
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        import matplotlib.colors as colors
-        import matplotlib.gridspec as gridspec
-        import pandas as pd
-        from collections import defaultdict
-        import h5py
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        try:
-            import pyfiglet
-            Title = True
-        except ImportError:
-            Title = False
-        self.h5py = h5py
-        self.pd = pd
-        self.os = os
-        self.sh = sdf_helper
-        self.np = np
-        self.plt = plt
-        self.glob = glob
-        self.cmaps = cmaps
-        self.cm = colors
-        self.gs = gridspec
-        self.re = re
-        self.defaultdict = defaultdict
         self.SimName = SimName
-        self.SimulationPath = self.os.path.abspath(self.SimName)
+        self.SimulationPath = os.path.abspath(self.SimName)
         self.Log = Log
         self.Movie = Movie
         self.Test = Test
-        self.plt.rcParams["axes.labelsize"] = 16
-        self.plt.rcParams["axes.titlesize"] = 16
-        self.plt.rcParams["xtick.labelsize"] = 14
-        self.plt.rcParams["ytick.labelsize"] = 14
-        self.plt.rcParams["legend.fontsize"] = 14
-        if Title: 
-            self.pyfiglet = pyfiglet
-            ascii_banner = self.pyfiglet.figlet_format("TimeLord")
-            if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
+        self.workers = pick_safe_workers()
+        ascii_banner = pyfiglet.figlet_format("TimeLord")
+        if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
-        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.sdf')])
-        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in self.glob.glob(f'{self.SimulationPath}/*.h5')])
+        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/*.sdf')])
+        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/*.h5')])
         if LenSDF == 0:
             if LenHDF == 0:
                 raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
@@ -80,11 +56,11 @@ class Process():
             self.LenSim = LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
-            workers = pick_safe_workers()
+            
             tasks = [(i, self.SimulationPath, DelData, bool(self.Test)) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
-            with ProcessPoolExecutor(max_workers=workers) as ex:
+            with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(convert_one, t) for t in tasks]
                 for fut in as_completed(futs):
                     i, err = fut.result()
@@ -96,19 +72,7 @@ class Process():
                     if idx_equiv != last_idx:
                         if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
                         last_idx = idx_equiv
-
-
-            # for i in range(self.LenSim):
-            #     if self.Test: print(f"Converting file {i:04d}.sdf to HDF5")
-            #     try: sdf_to_hdf5(self.os.path.join(self.SimulationPath, f"{i:04d}.sdf"), overwrite=True, verbose=False, delete_original=DelData)
-            #     except Exception as e:
-            #         if self.Log: print(f"Error converting file {i:04d}.sdf to HDF5: {e}")
-            #         continue
-            #     if self.Log: PrintPercentage(i, self.LenSim -1 )
             Message = "\n\n" + Message
-
-
-
 
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
         file_path = f'{self.SimulationPath}/input.deck'
@@ -153,28 +117,37 @@ class Process():
             if tmatch is None:
                 print("\033[1;31mtau_fwhm_I not found in simulation file! Setting to 0\033[0m")
                 self.Tau = 0
-        omega_las = 2.*self.np.pi*self.c / lambda_las if l_found else 1
+        omega_las = 2.*np.pi*self.c / lambda_las if l_found else 1
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
-        with self.h5py.File(self.os.path.join(self.SimulationPath, '0000.h5'), 'r') as file:
+        with h5py.File(os.path.join(self.SimulationPath, '0000.h5'), 'r') as file:
             self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
         self.space_axis = self.space_axis[:self.Dim]
-        self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*self.np.sqrt(self.np.log(2)))))/self.femto
+        self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*np.sqrt(np.log(2)))))/self.femto
         if Ped is not None: 
             print("\nAdding Ped to t0")
             if Ped > 1:
                 print("\nPed is in seconds, converting to picoseconds")
                 Ped = Ped*self.pico
             self.t0 = self.t0 + (Ped/self.femto)
-        self.raw_path = self.os.path.join(self.SimulationPath,  "Raw")
-        if not(self.os.path.exists(self.raw_path) and self.os.path.isdir(self.raw_path)):
-            self.os.mkdir(self.raw_path)
+        self.raw_path = os.path.join(self.SimulationPath,  "Raw")
+        if not(os.path.exists(self.raw_path) and os.path.isdir(self.raw_path)):
+            os.mkdir(self.raw_path)
         Message += f"\nGraphs will be saved in \033[1;32m{self.raw_path}\033[0m"
-        self.pros_path = self.os.path.join(self.SimulationPath, "Processed")
-        if not(self.os.path.exists(self.pros_path) and self.os.path.isdir(self.pros_path)):
-            self.os.mkdir(self.pros_path)
+        self.pros_path = os.path.join(self.SimulationPath, "Processed")
+        if not(os.path.exists(self.pros_path) and os.path.isdir(self.pros_path)):
+            os.mkdir(self.pros_path)
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
 
+    def DiagCheck(self, Diag):
+        File = h5py.File(os.path.join(self.SimulationPath, f"0000.h5"), 'r')
+        try: File[f"SDF/{Diag}"][:]
+        except:
+            File.close()
+            raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
+        File.close()
+        return True
+    
     def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None):
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
@@ -184,7 +157,7 @@ class Process():
             attr += "_averaged"
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
-        File = self.h5py.File(self.os.path.join(self.SimulationPath, f"{t:04d}.h5"), 'r')
+        File = h5py.File(os.path.join(self.SimulationPath, f"{t:04d}.h5"), 'r')
         try: File[f"SDF/{attr}"]
         except KeyError:
             File.close()
@@ -199,42 +172,43 @@ class Process():
                 Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
                 if dx != 1:
                     if dx == 0:
-                        dx = 4 if self.np.diff(Axis['x'][self.np.s_[::4]])[0] < 100e-3 else 2
-                    elif self.np.diff(Axis['x'][self.np.s_[::dx]])[0] > 100e-3:
+                        dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
+                    elif np.diff(Axis['x'][np.s_[::dx]])[0] > 100e-3:
                         print(f"Warning: dx = {dx} is too large. Setting dx = 4")
                         dx = 4
-                    Axis["x"] = Axis["x"][self.np.s_[::dx]]
+                    Axis["x"] = Axis["x"][np.s_[::dx]]
             elif axis == "y":
                 Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
                 if dy != 1:
                     if dy == 0:
-                        dy = 4 if self.np.diff(Axis['y'][self.np.s_[::4]])[0] < 100e-3 else 2
-                    elif self.np.diff(Axis['y'][self.np.s_[::dy]])[0] > 100e-3:
+                        dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
+                    elif np.diff(Axis['y'][np.s_[::dy]])[0] > 100e-3:
                         print(f"Warning: dy = {dy} is too large. Setting dy = 4")
                         dy = 4
-                    Axis["y"] = Axis["y"][self.np.s_[::dy]]
+                    Axis["y"] = Axis["y"][np.s_[::dy]]
             else:
                 if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
                 else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
-                Axis[axis] = self.np.reshape(Axis[axis], self.np.max(Axis[axis].shape))
+                Axis[axis] = np.reshape(Axis[axis], np.max(Axis[axis].shape))
 
         if Averaged and t == 0:
-            Data = self.np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
+            Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
             print("Skipped averaging for the first file")
         else:
-            Den = File[f"SDF/{attr}"][:]
+            try: Den = File[f"SDF/{attr}"][:]
+            except KeyError:
+                File.close()
+                raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
             if dx != 1:
-                Den = Den[self.np.s_[::dx, ::dy]]
+                Den = Den[np.s_[::dx, ::dy]]
             if Name == "rel electron density":
-                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][self.np.s_[::dx, ::dy]]
+                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
                 Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                 Den = Den / Gamma
             Data = Den
 
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
-        # elif Diag == "Electric_Field":
-        #     self.max_number = self.np.nanmax(Data)
 
         if "ekin" in AxisNames:
             if "carbon" in Name:
@@ -250,244 +224,267 @@ class Process():
         File.close()
         return Data, Axis
 
+    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if not Species and (E_las and E_avg) is None:
+                raise ValueError("No species or field were provided")
+            if Species and not isinstance(Species, list):
+                Species = [Species]
+                for type in Species:
+                    self.DiagCheck(f"Derived_Number_Density_{type}")
+            if E_las:
+                self.DiagCheck(f"Electric_Field_{E_las}")
+            if E_avg:
+                self.DiagCheck(f"Electric_Field_{E_avg}_averaged")
+            if Colours is not None and not isinstance(Colours, list):
+                if not isinstance(Colours, str):
+                    raise ValueError("Colours must be a list of strings")
+                elif Colours == "jet":
+                    Colours = None
+                elif len(Colours) != len(Species):
+                    print("Number of colours must match number of species\nSetting colours to 'jet'")
+                    Colours = None
+                else: Colours = [Colours]
+            if self.Log:
+                if DataOnly: print(f"\nGetting {Species} densities and/or {E_las if E_las else E_avg} field data only")
+                else:
+                    if Species: print(f"\nPlotting {[f'{s}' for s in Species]} densities{f' and {E_las if E_las else E_avg} field' if E_las or E_avg else ''}")
+                    else: print(f"\nPlotting {E_las if E_las else E_avg} field")
+            if DataOnly:
+                to_include = Species if Species else []
+                if E_las: to_include.append(E_las)
+                if E_avg: to_include.append(E_avg)
+                to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
+                for i in range(self.LenSim):
+                    if E_las:
+                        E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, i, dx=dx, dy=dy)
+                        to_return[E_las]['data'].append(E_data)
+                        for k, v in E_axis.items():
+                            to_return[E_las]['axis'][k].append(v)
+                    elif E_avg:
+                        E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
+                        to_return[E_avg]['data'].append(E_data)
+                        for k, v in E_axis.items():
+                            to_return[E_avg]['axis'][k].append(v)
+                    if Species:
+                        for type in Species:
+                            den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, i, dx=dx, dy=dy)
+                            to_return[type]['data'].append(den_to_plot[type])
+                            for k, v in axis[type].items():                 # axis[type] is a dict
+                                to_return[type]['axis'][k].append(v)
+                    if self.Log:
+                        PrintPercentage(i, self.LenSim - 1)
+                for type in to_include:
+                    to_return[type]['data'] = np.array(to_return[type]['data'])
+                    for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
+                return to_return
+            if File is None:
+                SaveFile = "density"
+                if E_las:
+                    SaveFile=f"{E_las}_{SaveFile}" 
+                elif E_avg:
+                    SaveFile=f"{E_avg}_avg_{SaveFile}"
+                if Species:
+                    if len(Species) == 1:
+                        SaveFile=f"{Species[0]}_{SaveFile}"
+                    else:
+                        SaveFile=f"{'_'.join(Species)}_{SaveFile}"
+            else: SaveFile = File
+            tasks = [(i, self, 'DensityPlot', Species, E_las, E_avg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            done = 0
+            last_idx = -1
+            with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                for fut in as_completed(futs):
+                    i, err = fut.result()
+                    if err:
+                        raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
+                    done += 1
+                    # keep your existing percentage display
+                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                    if idx_equiv != last_idx:
+                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                        last_idx = idx_equiv
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, Timestep=None, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False):
-        if not Species and (E_las and E_avg) is None:
-            raise ValueError("No species or field were provided")
-        if Species and not isinstance(Species, list):
-            Species = [Species]
-        if Colours is not None and not isinstance(Colours, list):
-            if not isinstance(Colours, str):
-                raise ValueError("Colours must be a list of strings")
-            elif Colours == "jet":
-                Colours = None
-            elif len(Colours) != len(Species):
-                print("Number of colours must match number of species\nSetting colours to 'jet'")
-                Colours = None
-            else: Colours = [Colours]
+            print(f"\nDensities saved in {self.raw_path}")
+            if self.Movie:
+                MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                print(f"\nMovies saved in {self.pros_path}")
 
-        TempFile=File if File is not None else "density"
-        
-        if self.Log:
-            if DataOnly: print(f"\nGetting {Species} densities and/or {E_las if E_las else E_avg} field data only")
-            else:
-                if Species: print(f"\nPlotting {Species} densities")
-                else: print(f"\nPlotting {E_las if E_las else E_avg} field")
-        FinalFile = self.LenSim
-        if not DataOnly: fig, ax = self.plt.subplots(num=1,clear=True, figsize=(8,6))
-        Plotted = False
-        if DataOnly:
-            to_include = Species if Species else []
-            if E_las: to_include.append(E_las)
-            if E_avg: to_include.append(E_avg)
-            to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in to_include}
-
-        for i in range(0 if Timestep is None else Timestep, self.LenSim if Timestep is None else Timestep+1):
+        elif MultiPros:
+            fig, ax = plt.subplots(clear=True, figsize=(8,6))
             den_to_plot={}
             axis={}
-            if not DataOnly: ax.clear()
             if E_las:
-                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, i, dx=dx, dy=dy)
+                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, Iter, dx=dx, dy=dy)
             elif E_avg:
-                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
+                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
-                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, i, dx=dx, dy=dy)
-            if DataOnly:
-                if Species:
-                    for type in Species:
-                        to_return[type]['data'].append(den_to_plot[type])
-                        for k, v in axis[type].items():                 # axis[type] is a dict
-                            to_return[type]['axis'][k].append(v)
-                if E_las:
-                    to_return[E_las]['data'].append(E_data)
-                    for k, v in E_axis.items():
-                        to_return[E_las]['axis'][k].append(v)
-                if E_avg:
-                    to_return[E_avg]['data'].append(E_data)
-                    for k, v in E_axis.items():
-                        to_return[E_avg]['axis'][k].append(v)
-                if self.Log and Timestep is None: 
-                    PrintPercentage(i, self.LenSim -1 )
-                continue
+                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, Iter, dx=dx, dy=dy)
 
             if self.Dim > 1:
                 if E_las or E_avg:
-                    if E_las:
-                        SaveFile=TempFile if File is not None else f"{E_las}_las_" + TempFile
-                    elif E_avg:
-                        SaveFile=TempFile if File is not None else f"{E_avg}_avg_" + TempFile
-                    FUnit = 'V/m' if 'E' in [E_las, E_avg] else 'T'
-                    try: cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=self.cmaps.vik, norm=self.cm.CenteredNorm(halfrange=self.np.nanmax(E_data.T) if EMax is None else EMax))
-                    except IndexError: 
-                        FinalFile = i
-                        continue
-                    
-                    if not Plotted:
-                        cbar1 = fig.colorbar(cax1, aspect=50, location='left')
-                        cbar1.set_label(f"{E_las if E_las else E_avg} [{FUnit}]")
+                    E = E_las if E_las else E_avg
+                    FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
+                    cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if EMax is None else EMax))
+                    cbar1 = fig.colorbar(cax1, aspect=50)
+                    cbar1.set_label(f"{E_las if E_las else E_avg} [{FUnit}]")
                 if Species:
                     for type in Species:
-                        SaveFile=TempFile if File is not None else f"{type}_" + TempFile
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
-                        cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=self.cmaps.batlowW_r if Colours is None else getattr(self.cmaps, Colours[Species.index(type)]), norm=self.cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
-                        if (Colours is not None) and (len(Colours) > 1) and (not E_las or not E_avg) and not Plotted:
-                            cbar=fig.colorbar(cax, aspect=50, location='right')
+                        cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowW_r if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
+                        if (Colours is not None) and (len(Colours) > 1) and (not E_las or not E_avg):
+                            cbar=fig.colorbar(cax, aspect=50)
                             cbar.set_label(f"N$_{{{type}}}$ [$N_c$]")
-                    if ((Colours is None) or (len(Colours) == 1)) and not Plotted:
-                        cbar=fig.colorbar(cax, aspect=50, location='right')
+                    if ((Colours is None) or (len(Colours) == 1)):
+                        cbar=fig.colorbar(cax, aspect=50)
                         cbar.set_label('N [$N_c$]')
                 ax.set_ylabel(r'y [$\mu$m]')
             elif self.Dim == 1:
                 if E_las or E_avg:
-                    if E_las:
-                        SaveFile=TempFile if File is not None else f"{E_las}_las_" + TempFile
-                    elif E_avg:
-                        SaveFile=TempFile if File is not None else f"{E_avg}_avg_" + TempFile
-                    FUnit = 'V/m' if 'E' in [E_las, E_avg] else 'T'
+                    E = E_las if E_las else E_avg
+                    FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     if not Species:
-                        try: ax.plot(E_axis['x'], E_data, label=E_las if E_las else E_avg)
-                        except IndexError: 
-                            FinalFile = i
-                            continue
-                        else:
-                            ax.set(ylim=(-self.np.nanmax(E_data) if EMax is None else -EMax, self.np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{E_las if E_las else E_avg} [{FUnit}]")
+                        ax.plot(E_axis['x'], E_data, label=E_las if E_las else E_avg)
+                        ax.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{E_las if E_las else E_avg} [{FUnit}]")
                     else:
                         ax2 = ax.twinx()
                         ax2.plot(E_axis['x'], E_data, 'r', label=E_las if E_las else E_avg)
-                        ax2.set(ylim=(-self.np.nanmax(E_data) if EMax is None else -EMax, self.np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{E_las if E_las else E_avg} [{FUnit}]")
+                        ax2.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{E_las if E_las else E_avg} [{FUnit}]")
                 if Species:
                     for type in Species:
-                        SaveFile=TempFile if File is not None else f"{type}_" + TempFile
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
                     ax.set(ylim=(1e-3 if CBMin is None else CBMin, 1e3 if CBMax is None else CBMax), ylabel='N [$N_c$]', yscale='log',
-                           xlim=(self.np.min(axis[type]['x']), self.np.max(axis[type]['x'])))
+                           xlim=(np.min(axis[type]['x']), np.max(axis[type]['x'])))
             if Species: ax.set_title(f"{axis[type]['Time']}fs")
             else: ax.set_title(f"{E_axis['Time']}fs")
             ax.grid(True)
             ax.set_xlabel(r'x [$\mu$m]')
             fig.tight_layout()
-            self.plt.savefig(self.raw_path + "/" + SaveFile + "_" + str(i) + ".png",dpi=200)
-            Plotted = True
-            if self.Log and Timestep is None: 
-                PrintPercentage(i, self.LenSim -1 )
-        if DataOnly:
-            for type in to_include:
-                to_return[type]['data'] = self.np.array(to_return[type]['data'])
-                for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = self.np.array(to_return[type]['axis'][axis])
-            return to_return
-        print(f"\nDensities saved in {self.raw_path}")
-        if self.Movie and Timestep is None:
-            MakeMovie(self.raw_path, self.pros_path, 0, FinalFile, SaveFile)
-            print(f"\nMovies saved in {self.pros_path}")
+            plt.savefig(self.raw_path + "/" + File + "_" + str(Iter) + ".png",dpi=200)
+            plt.close(fig)
         
-    def SpectraPlot(self, Species=[], XMax=None, YMin=None, YMax=None, File=None, Z=None, Avereraged=True, DataOnly=False):
-        if not Species:
-            raise ValueError("No species were provided")
-        if not isinstance(Species, list):
-            Species = [Species]
-        
-        TempFile=File if File is not None else "energies"        
-        
-        if DataOnly:
-            if len(Species) == 1:
-                to_return = {'data': [], 'axis': self.defaultdict(list)}
-            else:
-                to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in Species}
-        
-        if not DataOnly: fig, ax = self.plt.subplots(num=2,clear=True, figsize=(8,6))
-        for i in range(self.LenSim):
-            spect_to_plot={}
-            axis={}
-            label={}
-            if not DataOnly: ax.clear()
+    def SpectraPlot(self, Species=[], XMax=None, YMin=None, YMax=None, File=None, Z=None, Avereraged=True, DataOnly=False, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if not Species:
+                raise ValueError("No species were provided")
+            if not isinstance(Species, list):
+                Species = [Species]
             for type in Species:
-                spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], i, Z=Z)
-                if Avereraged:
-                    spect_to_plot[type] = MovingAverage(spect_to_plot[type], 3)
-                if DataOnly: continue
-                label[type] = type
-                SaveFile=TempFile if File is not None else f"{type}_" + TempFile
-                ax.plot(axis[type]['ekin'], spect_to_plot[type], label=f"{label[type]}")
-            
+                self.DiagCheck(f"dist_fn_spectra_{type}")
             if DataOnly:
                 if len(Species) == 1:
-                    to_return['data'].append(spect_to_plot[Species[0]])
-                    for k, v in axis[Species[0]].items():
-                        to_return['axis'][k].append(v)
+                    to_return = {'data': [], 'axis': defaultdict(list)}
                 else:
-                    to_return[type]['data'].append(spect_to_plot[type])
-                    for k, v in axis[type].items():                 # axis[type] is a dict
-                        to_return[type]['axis'][k].append(v)
-                continue
-            XMax = self.np.nanmax([axis[type]['ekin'] for type in Species]) if XMax is None else XMax
-            YMax = self.np.nanmax([spect_to_plot[type] for type in Species]) if YMax is None else YMax
+                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                for i in range(self.LenSim):
+                    for type in Species:
+                        spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], i, Z=Z)
+                    if Avereraged:
+                        spect_to_plot[type] = MovingAverage(spect_to_plot[type], 3)
+                    if len(Species) == 1:
+                        to_return['data'].append(spect_to_plot[Species[0]])
+                        for k, v in axis[Species[0]].items():
+                            to_return['axis'][k].append(v)
+                    else:
+                        to_return[type]['data'].append(spect_to_plot[type])
+                        for k, v in axis[type].items():                 # axis[type] is a dict
+                            to_return[type]['axis'][k].append(v)
+                if len(Species) == 1:
+                    to_return['data'] = np.array(to_return['data'])
+                    for axis in to_return['axis'].keys(): to_return['axis'][axis] = np.array(to_return['axis'][axis])
+                    return to_return['data'], to_return['axis']
+                else:
+                    for type in Species:
+                        to_return[type]['data'] = np.array(to_return[type]['data'])
+                        for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
+                    return to_return
+            if File is None:
+                SaveFile = "energies"
+                if len(Species) == 1:
+                    SaveFile=f"{Species[0]}_{SaveFile}"
+                else:
+                    SaveFile=f"{'_'.join(Species)}_{SaveFile}"
+            else: SaveFile = File
+            tasks = [(i, self, 'SpectraPlot', Species, XMax, YMin, YMax, SaveFile, Z, Avereraged) for i in range(self.LenSim)]
+            done = 0
+            last_idx = -1
+            with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                for fut in as_completed(futs):
+                    i, err = fut.result()
+                    if err:
+                        raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
+                    done += 1
+                    # keep your existing percentage display
+                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                    if idx_equiv != last_idx:
+                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                        last_idx = idx_equiv
+
+            print(f"\nDensities saved in {self.raw_path}")
+            if self.Movie:
+                MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                print(f"\nMovies saved in {self.pros_path}")
+
+        elif MultiPros:
+            fig, ax = plt.subplots(clear=True, figsize=(8,6))
+            spect_to_plot={}
+            axis={}
+            for type in Species:
+                spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], Iter, Z=Z)
+                if Avereraged:
+                    spect_to_plot[type] = MovingAverage(spect_to_plot[type], 3)
+                ax.plot(axis[type]['ekin'], spect_to_plot[type], label=f"{type}")
+            XMax = np.nanmax([axis[type]['ekin'] for type in Species]) if XMax is None else XMax
+            YMax = np.nanmax([spect_to_plot[type] for type in Species]) if YMax is None else YMax
             ax.set(xlabel='E [$MeV$]', xlim=(0,XMax if XMax > 0 else 0.1),
                    ylabel='dNdE [arb. units]', ylim=(YMax/1e10 if YMin is None else YMin, YMax), yscale='log',
                    title=f"{axis[type]['Time']}fs")
             ax.grid(True)
             ax.legend()
             fig.tight_layout()
-            self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
-            if self.Log: 
-                PrintPercentage(i, self.LenSim -1 )
-        if DataOnly:
-            if len(Species) == 1:
-                to_return['data'] = self.np.array(to_return['data'])
-                for axis in to_return['axis'].keys(): to_return['axis'][axis] = self.np.array(to_return['axis'][axis])
-                return to_return['data'], to_return['axis']
-            else:
-                for type in Species:
-                    to_return[type]['data'] = self.np.array(to_return[type]['data'])
-                    for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = self.np.array(to_return[type]['axis'][axis])
-                return to_return
-        print(f"\nSpectra saved in {self.raw_path}")
-        if self.Movie:
-            MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-            print(f"\nMovies saved in {self.pros_path}")
+            plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+            plt.close(fig)
     
-    def AnglePlot(self, Species=[], CBMin=None, CBMax=None, XMax=None, YMin=None, YMax=None, LasAngle=None, Integrate=None, File=None, DataOnly=False, Z=None):
-        if not Species:
-            raise ValueError("No species were provided")
-        if not isinstance(Species, list):
-            Species = [Species]
-        if not isinstance(XMax, list):
+    def AnglePlot(self, Species=[], CBMin=None, CBMax=None, XMax=None, YMin=None, YMax=None, LasAngle=None, Integrate=None, File=None, Z=None, DataOnly=False, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if not Species:
+                raise ValueError("No species were provided")
+            if not isinstance(Species, list):
+                Species = [Species]
+            for type in Species:
+                self.DiagCheck(f"dist_fn_xy_energy_{type}")
+            if not isinstance(XMax, list):
+                if XMax is not None:
+                    XMax = [XMax]
             if XMax is not None:
-                XMax = [XMax]
-        if XMax is not None:
-            if len(XMax) < len(Species):
-                if len(XMax) != 1:
-                    raise ValueError("XMax must be a list of the same length as Species or a single value")
-                else: XMax = XMax * len(Species)
-            
-        if YMin is not None and YMin < -self.np.pi:
-            YMin = self.np.radians(YMin)
-        if YMax is not None and YMax > self.np.pi:
-            YMax = self.np.radians(YMax)
-        if YMin is None:
-            if YMax is not None:
-                YMin = -YMax
-        else:
-            if YMax is None:
-                if YMin > 0:
-                    YMin = -YMin
-                YMax = -YMin
-        InitalFile=0
-        TempFile=File if File is not None else "angles"
-
-        if DataOnly:
-            if len(Species) == 1:
-                to_return = {'data': [], 'axis': self.defaultdict(list)}
+                if len(XMax) < len(Species):
+                    if len(XMax) != 1:
+                        raise ValueError("XMax must be a list of the same length as Species or a single value")
+                    else: XMax = XMax * len(Species)
+            if YMin is not None and YMin < -np.pi:
+                YMin = np.radians(YMin)
+            if YMax is not None and YMax > np.pi:
+                YMax = np.radians(YMax)
+            if YMin is None:
+                if YMax is not None:
+                    YMin = -YMax
             else:
-                to_return = {type : {'data': [], 'axis': self.defaultdict(list)} for type in Species}
+                if YMax is None:
+                    if YMin > 0:
+                        YMin = -YMin
+                    YMax = -YMin
 
-        InitalFile = 0
-        for type in Species:
-            if self.Log: print(f"\nPlotting {type} angles")
-            if not DataOnly: fig, ax = self.plt.subplots(num=4,clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
-            for i in range(self.LenSim):
-                angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], i, Z=Z)
-                if DataOnly:
+            if DataOnly:
+                if len(Species) == 1:
+                    to_return = {'data': [], 'axis': defaultdict(list)}
+                else:
+                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                for i in range(self.LenSim):
+                    for type in Species:
+                        angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], i, Z=Z)
                     if len(Species) == 1:
                         to_return['data'].append(angle_to_plot)
                         for k, v in axis.items():
@@ -496,48 +493,67 @@ class Process():
                         to_return[type]['data'].append(angle_to_plot)
                         for k, v in axis.items():                 # axis[type] is a dict
                             to_return[type]['axis'][k].append(v)
-                    continue
-                ax.clear()
-                SaveFile=TempFile if File is not None else f"{type}_" + TempFile
-                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=self.cmaps.batlowW_r, norm=self.cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+                if len(Species) == 1:
+                    to_return['data'] = np.array(to_return['data'])
+                    for axis in to_return['axis'].keys(): to_return['axis'][axis] = np.array(to_return['axis'][axis])
+                    return to_return['data'], to_return['axis']
+                else:
+                    for type in Species:
+                        to_return[type]['data'] = np.array(to_return[type]['data'])
+                        for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
+                    return to_return
+            for type in Species:
+                if File is None:
+                    SaveFile = f"{type}_angles"
+                else: SaveFile = File
+                tmp_max = XMax[Species.index(type)] if XMax is not None else None
+                tasks = [(i, self, 'AnglePlot', [type], CBMin, CBMax, tmp_max, YMin, YMax, LasAngle, Integrate, SaveFile, Z) for i in range(self.LenSim)]
+                done = 0
+                last_idx = -1
+                if self.Log: print(f"\nPlotting {type} angles")
+                with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                    futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                    for fut in as_completed(futs):
+                        i, err = fut.result()
+                        if err:
+                            raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
+                        done += 1
+                        # keep your existing percentage display
+                        idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                        if idx_equiv != last_idx:
+                            if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                            last_idx = idx_equiv
+
+                print(f"\nDensities saved in {self.raw_path}")
+                if self.Movie:
+                    MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                    print(f"\nMovies saved in {self.pros_path}")
+
+        elif MultiPros:
+            type = Species[0]
+            fig, ax = plt.subplots(clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
+            for i in range(self.LenSim):
+                angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
+                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowW_r, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
                 except ValueError: 
-                    InitalFile+=1
-                    if self.Log: print(f"Skipping {axis['Time']}fs")
-                    continue
+                    print(np.max(axis['theta']),np.max(axis['ekin']))
+                    cax = ax.pcolormesh(axis['theta'],axis['ekin'], np.zeros(angle_to_plot.T.shape), cmap=cmaps.batlowW_r, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
                 cbar = fig.colorbar(cax, aspect=50)
                 cbar.set_label('dNdE [arb. units]')
-                xmax = self.np.nanmax(axis['ekin']) if XMax is None else XMax[Species.index(type)]
+                xmax = np.nanmax(axis['ekin']) if XMax is None else XMax[0]
                 if LasAngle is not None:
-                    ax.vlines(self.np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
+                    ax.vlines(np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
                 if Integrate is not None:
-                    if LasAngle is not None: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), self.np.radians(LasAngle - Integrate) , self.np.radians(LasAngle + Integrate), color='r', alpha=0.2)
-                    else: ax.fill_betweenx(self.np.linspace(0, xmax, axis['ekin'].shape[0]), -self.np.radians(Integrate), self.np.radians(Integrate), color='r', alpha=0.2)
-                ax.set(xlim=(-self.np.pi if YMin is None else YMin,self.np.pi if YMax is None else YMax),
+                    if LasAngle is not None: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), np.radians(LasAngle - Integrate) , np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                    else: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), -np.radians(Integrate), np.radians(Integrate), color='r', alpha=0.2)
+                ax.set(xlim=(-np.pi if YMin is None else YMin,np.pi if YMax is None else YMax),
                         ylim=(0,xmax))
-                if YMax is None or YMax > self.np.pi/2:
+                if YMax is None or YMax > np.pi/2:
                     ax.set_rlabel_position(90)
                 fig.suptitle(f"{axis['Time']}fs")
                 fig.tight_layout()
-                self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
-                cbar.remove()
-                if self.Log: 
-                    PrintPercentage(i, self.LenSim - 1)
-            if DataOnly:
-                continue
-            print(f"\nAngles saved in {self.raw_path}")
-            if self.Movie:
-                MakeMovie(self.raw_path, self.pros_path, InitalFile, self.LenSim, SaveFile)
-                print(f"\nMovies saved in {self.pros_path}")
-        if DataOnly:
-            if len(Species) == 1:
-                to_return['data'] = self.np.array(to_return['data'])
-                for axis in to_return['axis'].keys(): to_return['axis'][axis] = self.np.array(to_return['axis'][axis])
-                return to_return['data'], to_return['axis']
-            else:
-                for type in Species:
-                    to_return[type]['data'] = self.np.array(to_return[type]['data'])
-                    for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = self.np.array(to_return[type]['axis'][axis])
-                return to_return
+                plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+                plt.close(fig)
 
     def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, DataOnly=False):
         if not Species:
@@ -558,34 +574,34 @@ class Process():
         if DataOnly:
             if len(Angles) > 1:
                 raise ValueError("DataOnly can only be used with a single angle")
-            A_arg = self.np.argwhere(abs(axis[type]['theta'][0]-self.np.radians(AngleOffset))<=self.np.radians(Angles[0]))
+            A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
             if len(Species) == 1:
-                return self.np.reshape(self.np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1])), axis[Species[0]]
+                return np.reshape(np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1])), axis[Species[0]]
                 # return spect_to_plot[Species[0]], axis[Species[0]]
-            return {type : {'data': self.np.reshape(self.np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1])), 'axis': axis[type]} for type in Species}
+            return {type : {'data': np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1])), 'axis': axis[type]} for type in Species}
 
         for type in Species:
             if self.Log: print(f"\nPlotting {type} angle energies")
             SaveFile= TempFile + f"_{type}" 
 
             for i in range(self.LenSim):
-                fig, ax = self.plt.subplots(num=3,clear=True, figsize=(8,6))
+                fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
                 for j in Angles:
                     if j == 0:
-                        A0_arg = self.np.argwhere(axis[type]['theta'][i]-self.np.radians(AngleOffset)==abs(axis[type]['theta'][i]-self.np.radians(AngleOffset)).min())[0]
-                        ax.plot(axis[type]["ekin"][i], self.np.reshape(spect_to_plot[type][i][A0_arg,:], axis[type]["ekin"][i].shape), label=r'$\theta$ $\equal$ 0$\degree$')
+                        A0_arg = np.argwhere(axis[type]['theta'][i]-np.radians(AngleOffset)==abs(axis[type]['theta'][i]-np.radians(AngleOffset)).min())[0]
+                        ax.plot(axis[type]["ekin"][i], np.reshape(spect_to_plot[type][i][A0_arg,:], axis[type]["ekin"][i].shape), label=r'$\theta$ $\equal$ 0$\degree$')
                     else:
-                        A_arg = self.np.argwhere(abs(axis[type]['theta'][i]-self.np.radians(AngleOffset))<=self.np.radians(j))
-                        A_energies = self.np.reshape(self.np.sum(spect_to_plot[type][i][A_arg,:],axis=0),spect_to_plot[type][i].shape[1])
+                        A_arg = np.argwhere(abs(axis[type]['theta'][i]-np.radians(AngleOffset))<=np.radians(j))
+                        A_energies = np.reshape(np.sum(spect_to_plot[type][i][A_arg,:],axis=0),spect_to_plot[type][i].shape[1])
                         ax.plot(axis[type]['ekin'][i], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$")
-                XMax = self.np.nanmax(axis[type]['ekin']) if XMax is None else XMax
-                YMax = self.np.nanmax(spect_to_plot[type]) if YMax is None else YMax
+                XMax = np.nanmax(axis[type]['ekin']) if XMax is None else XMax
+                YMax = np.nanmax(spect_to_plot[type]) if YMax is None else YMax
                 ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, YMax if YMax > 0 else 1e16), yscale='log',
                            xlabel='Energy [MeV/u]', xlim=(0, XMax if XMax > 0 else 0.1),
                            title=f"{axis[type]['Time'][i]}fs")
                 ax.legend()
                 fig.tight_layout()
-                self.plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
+                plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
                 if self.Log: 
                     PrintPercentage(i, self.TimeSteps.size -1 )
             print(f"\nAngle energies saved in {self.raw_path}")
@@ -612,36 +628,36 @@ class Process():
 
         num_protons = data['proton'].shape[1]
 
-        ion_front = self.np.zeros(self.LenSim)
-        las_front = self.np.zeros(self.LenSim)
+        ion_front = np.zeros(self.LenSim)
+        las_front = np.zeros(self.LenSim)
 
         print(f"\nCalculating Laser-Ion-Fronts")
         for t in range(1, self.LenSim):
-            Outline = self.np.zeros(num_protons)
+            Outline = np.zeros(num_protons)
 
-            args = self.np.argwhere(self.np.sum(data['proton'][t], axis=0) >= 1e12)[:,0]
+            args = np.argwhere(np.sum(data['proton'][t], axis=0) >= 1e12)[:,0]
             for j in range(num_protons):
-                try: Outline[j] = self.np.max(axis['proton']['ekin'][t][data['proton'][t][j,args] > 1e5])
+                try: Outline[j] = np.max(axis['proton']['ekin'][t][data['proton'][t][j,args] > 1e5])
                 except ValueError: Outline[j] = 0
-            ion_front = axis['proton']['x'][self.np.argmax(Outline)]
+            ion_front = axis['proton']['x'][np.argmax(Outline)]
 
-            Ex_arg = self.np.argwhere(abs(axis['ex']['y']) < 0.5)
-            ExField = self.np.reshape(self.np.mean(data['ex'][t][:, Ex_arg], axis=1), axis['ex']['x'].shape)
-            las_front = axis['ex']['x'][self.np.argmax(ExField)]
+            Ex_arg = np.argwhere(abs(axis['ex']['y']) < 0.5)
+            ExField = np.reshape(np.mean(data['ex'][t][:, Ex_arg], axis=1), axis['ex']['x'].shape)
+            las_front = axis['ex']['x'][np.argmax(ExField)]
 
         print(f"\nPlotting Laser-Ion-Fronts")
-        xmin = self.np.min(axis['ex']['x']) if XMin is None else XMin
-        xmax = self.np.max(axis['ex']['x']) if XMax is None else XMax
+        xmin = np.min(axis['ex']['x']) if XMin is None else XMin
+        xmax = np.max(axis['ex']['x']) if XMax is None else XMax
         for t in range(1, self.LenSim):
-            fig, ax = self.plt.subplots(3, sharex=True, num=11, clear=True, figsize=(8, 10))
-            ax[0].pcolormesh(axis['ex']['x'], axis['ex']['y'], data['ex'][t].T, cmap=self.cmaps.vik, norm=self.cm.CenteredNorm(halfrange=self.max_number if EMax is None else EMax))
+            fig, ax = plt.subplots(3, sharex=True, num=11, clear=True, figsize=(8, 10))
+            ax[0].pcolormesh(axis['ex']['x'], axis['ex']['y'], data['ex'][t].T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=self.max_number if EMax is None else EMax))
             ax2=ax[1].twinx()
-            ax[1].plot(axis['electron']['x'], self.np.mean(data['electron'][t][:, self.np.argwhere(abs(axis['electron']['y']) < 0.5)], axis=1), color='blue')
-            ax2.plot(axis['ex']['x'], self.np.mean(data['ex'][t][:, Ex_arg], axis=1), color='red')
-            ax[2].pcolormesh(axis['proton']['x'], axis['proton']['ekin'][t], data['proton'][t].T, norm=self.cm.LogNorm(vmin=round_up_scientific_notation(self.np.max(data['proton']))/1e6, vmax=round_up_scientific_notation(self.np.max(data['proton']))), cmap=self.cmaps.batlowW_r)
+            ax[1].plot(axis['electron']['x'], np.mean(data['electron'][t][:, np.argwhere(abs(axis['electron']['y']) < 0.5)], axis=1), color='blue')
+            ax2.plot(axis['ex']['x'], np.mean(data['ex'][t][:, Ex_arg], axis=1), color='red')
+            ax[2].pcolormesh(axis['proton']['x'], axis['proton']['ekin'][t], data['proton'][t].T, norm=cm.LogNorm(vmin=round_up_scientific_notation(np.max(data['proton']))/1e6, vmax=round_up_scientific_notation(np.max(data['proton']))), cmap=cmaps.batlowW_r)
             ax[0].set(ylabel='y [$\\mu$m]')
             ax[1].set(yscale='log', ylim=(1e-2, 5e1), ylabel='N$_e$ [N$_c$]')
-            ax[2].set(ylim=(0, self.np.max(axis['proton']['ekin'])), ylabel='E [MeV]',
+            ax[2].set(ylim=(0, np.max(axis['proton']['ekin'])), ylabel='E [MeV]',
                       xlabel='x [$\\mu$m]', xlim=(xmin, xmax))
             ax2.set(ylim=(-self.max_number, self.max_number), ylabel='E$_x$ [V/m]')
             ax[1].grid()

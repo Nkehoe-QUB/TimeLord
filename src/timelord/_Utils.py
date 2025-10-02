@@ -507,3 +507,10 @@ def convert_one(args):
         return (i, None)  # success
     except Exception as e:
         return (i, e)     # failure
+
+def Iter_Plot(args):
+    try:
+        getattr(args[1], args[2])(*args[3:], MultiPros=True, Iter=args[0])
+        return (args[0], None)  # success
+    except Exception as e:
+        return (args[0], e)     # failure
