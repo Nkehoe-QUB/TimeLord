@@ -378,6 +378,8 @@ class Process():
                     to_return = {'data': [], 'axis': defaultdict(list)}
                 else:
                     to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                spect_to_plot={}
+                axis={}
                 for i in range(self.LenSim):
                     for type in Species:
                         spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], i, Z=Z)
