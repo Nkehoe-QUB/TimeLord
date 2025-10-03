@@ -10,8 +10,8 @@ plt.rcParams["ytick.labelsize"] = 14
 plt.rcParams["legend.fontsize"] = 14
 import matplotlib.colors as cm
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True):
@@ -37,6 +37,7 @@ class Process():
         self.Log = Log
         self.Movie = Movie
         self.Test = Test
+        self.Colours = {'electron': 'r', 'proton': 'b', 'carbon': 'k'}
         self.workers = pick_safe_workers()
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
@@ -64,9 +65,10 @@ class Process():
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(convert_one, t) for t in tasks]
                 for fut in as_completed(futs):
-                    i, err = fut.result()
-                    if err and self.Log and self.Test:
-                        print(f"Error converting file {i:04d}.sdf to HDF5: {err}")
+                    try:
+                        _ = fut.result()
+                    except Exception as e:
+                        raise
                     done += 1
                     # keep your existing percentage display
                     idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
@@ -210,6 +212,8 @@ class Process():
 
         if Diag == "Derived_Number_Density":
             Data = Data / self.den_crit  # Convert to normalized number density
+        elif Diag == "Derived_Average_Particle_Energy":
+            Data = Data / self.MeV_to_J  # Convert to MeV
 
         if "ekin" in AxisNames:
             if "carbon" in Name:
@@ -225,14 +229,15 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, E_las=False, E_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
             if not Species and (E_las and E_avg) is None:
                 raise ValueError("No species or field were provided")
             if Species and not isinstance(Species, list):
                 Species = [Species]
                 for type in Species:
-                    self.DiagCheck(f"Derived_Number_Density_{type}")
+                    if not EkBar: self.DiagCheck(f"Derived_Number_Density_{type}")
+                    else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if E_las:
                 self.DiagCheck(f"Electric_Field_{E_las}")
             if E_avg:
@@ -247,9 +252,9 @@ class Process():
                     Colours = None
                 else: Colours = [Colours]
             if self.Log:
-                if DataOnly: print(f"\nGetting {Species} densities and/or {E_las if E_las else E_avg} field data only")
+                if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities and/or {E_las if E_las else E_avg} field data only")
                 else:
-                    if Species: print(f"\nPlotting {[f'{s}' for s in Species]} densities{f' and {E_las if E_las else E_avg} field' if E_las or E_avg else ''}")
+                    if Species: print(f"\nPlotting {[f'{s}' for s in Species]} {'average energy 'if EkBar else ''}densities{f' and {E_las if E_las else E_avg} field' if E_las or E_avg else ''}")
                     else: print(f"\nPlotting {E_las if E_las else E_avg} field")
             if DataOnly:
                 to_include = Species if Species else []
@@ -269,7 +274,7 @@ class Process():
                             to_return[E_avg]['axis'][k].append(v)
                     if Species:
                         for type in Species:
-                            den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, i, dx=dx, dy=dy)
+                            den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, i, dx=dx, dy=dy)
                             to_return[type]['data'].append(den_to_plot[type])
                             for k, v in axis[type].items():                 # axis[type] is a dict
                                 to_return[type]['axis'][k].append(v)
@@ -280,7 +285,7 @@ class Process():
                     for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
                 return to_return
             if File is None:
-                SaveFile = "density"
+                SaveFile = "density" if not EkBar else "energy_density"
                 if E_las:
                     SaveFile=f"{E_las}_{SaveFile}" 
                 elif E_avg:
@@ -291,21 +296,26 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, E_las, E_avg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, E_las, E_avg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
-                for fut in as_completed(futs):
-                    i, err = fut.result()
-                    if err:
-                        raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
-                    done += 1
-                    # keep your existing percentage display
-                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
-                    if idx_equiv != last_idx:
-                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
-                        last_idx = idx_equiv
+                try:
+                    for fut in as_completed(futs):
+                        i, err, tb = fut.result()
+                        if err:
+                            Print_Error(futs, ex, i, err, tb)
+                        else:
+                            done += 1
+                            # keep your existing percentage display
+                            idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                            if idx_equiv != last_idx:
+                                if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                last_idx = idx_equiv
+                finally:
+                    # make sure we don't block on shutdown; it's idempotent
+                    ex.shutdown(wait=False, cancel_futures=True)
 
             print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
@@ -322,7 +332,7 @@ class Process():
                 E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
-                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, Iter, dx=dx, dy=dy)
+                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
 
             if self.Dim > 1:
                 if E_las or E_avg:
@@ -334,10 +344,13 @@ class Process():
                 if Species:
                     for type in Species:
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
-                        cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowW_r if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
+                        if not EkBar:
+                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
+                        else:
+                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.Normalize(vmin=0.0 if CBMin is None else CBMin, vmax=np.nanmax(den_to_plot[type].T) if CBMax is None else CBMax))
                         if (Colours is not None) and (len(Colours) > 1) and (not E_las or not E_avg):
                             cbar=fig.colorbar(cax, aspect=50)
-                            cbar.set_label(f"N$_{{{type}}}$ [$N_c$]")
+                            cbar.set_label(f"N$_{{{type}}}$ {'[$N_c$]' if not EkBar else '[MeV]'}")
                     if ((Colours is None) or (len(Colours) == 1)):
                         cbar=fig.colorbar(cax, aspect=50)
                         cbar.set_label('N [$N_c$]')
@@ -356,7 +369,7 @@ class Process():
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
-                    ax.set(ylim=(1e-3 if CBMin is None else CBMin, 1e3 if CBMax is None else CBMax), ylabel='N [$N_c$]', yscale='log',
+                    ax.set(ylim=(1e-3 if CBMin is None else CBMin, 1e3 if CBMax is None else CBMax), ylabel=f'N {"[$N_c$]" if not EkBar else "[MeV]"}', yscale='log',
                            xlim=(np.min(axis[type]['x']), np.max(axis[type]['x'])))
             if Species: ax.set_title(f"{axis[type]['Time']}fs")
             else: ax.set_title(f"{E_axis['Time']}fs")
@@ -415,16 +428,21 @@ class Process():
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
-                for fut in as_completed(futs):
-                    i, err = fut.result()
-                    if err:
-                        raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
-                    done += 1
-                    # keep your existing percentage display
-                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
-                    if idx_equiv != last_idx:
-                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
-                        last_idx = idx_equiv
+                try:
+                    for fut in as_completed(futs):
+                        i, err, tb = fut.result()
+                        if err:
+                            Print_Error(futs, ex, i, err, tb)
+                        else:
+                            done += 1
+                            # keep your existing percentage display
+                            idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                            if idx_equiv != last_idx:
+                                if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                last_idx = idx_equiv
+                finally:
+                    # make sure we don't block on shutdown; it's idempotent
+                    ex.shutdown(wait=False, cancel_futures=True)
 
             print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
@@ -439,7 +457,7 @@ class Process():
                 spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], Iter, Z=Z)
                 if Avereraged:
                     spect_to_plot[type] = MovingAverage(spect_to_plot[type], 3)
-                ax.plot(axis[type]['ekin'], spect_to_plot[type], label=f"{type}")
+                ax.plot(axis[type]['ekin'], spect_to_plot[type], label=f"{type}", color=self.Colours[type] if type in self.Colours.keys() else None)
             XMax = np.nanmax([axis[type]['ekin'] for type in Species]) if XMax is None else XMax
             YMax = np.nanmax([spect_to_plot[type] for type in Species]) if YMax is None else YMax
             ax.set(xlabel='E [$MeV$]', xlim=(0,XMax if XMax > 0 else 0.1),
@@ -516,16 +534,21 @@ class Process():
                 if self.Log: print(f"\nPlotting {type} angles")
                 with ProcessPoolExecutor(max_workers=self.workers) as ex:
                     futs = [ex.submit(Iter_Plot, t) for t in tasks]
-                    for fut in as_completed(futs):
-                        i, err = fut.result()
-                        if err:
-                            raise RuntimeError(f"Error processing file {i:04d}.h5: {err}")
-                        done += 1
-                        # keep your existing percentage display
-                        idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
-                        if idx_equiv != last_idx:
-                            if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
-                            last_idx = idx_equiv
+                    try:
+                        for fut in as_completed(futs):
+                            i, err, tb = fut.result()
+                            if err:
+                                Print_Error(futs, ex, i, err, tb)
+                            else:
+                                done += 1
+                                # keep your existing percentage display
+                                idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                                if idx_equiv != last_idx:
+                                    if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                    last_idx = idx_equiv
+                    finally:
+                        # make sure we don't block on shutdown; it's idempotent
+                        ex.shutdown(wait=False, cancel_futures=True)
 
                 print(f"\nDensities saved in {self.raw_path}")
                 if self.Movie:
@@ -592,11 +615,11 @@ class Process():
                 for j in Angles:
                     if j == 0:
                         A0_arg = np.argwhere(axis[type]['theta'][i]-np.radians(AngleOffset)==abs(axis[type]['theta'][i]-np.radians(AngleOffset)).min())[0]
-                        ax.plot(axis[type]["ekin"][i], np.reshape(spect_to_plot[type][i][A0_arg,:], axis[type]["ekin"][i].shape), label=r'$\theta$ $\equal$ 0$\degree$')
+                        ax.plot(axis[type]["ekin"][i], np.reshape(spect_to_plot[type][i][A0_arg,:], axis[type]["ekin"][i].shape), label=r'$\theta$ $\equal$ 0$\degree$', color=self.Colours[type] if type in self.Colours.keys() else None)
                     else:
                         A_arg = np.argwhere(abs(axis[type]['theta'][i]-np.radians(AngleOffset))<=np.radians(j))
                         A_energies = np.reshape(np.sum(spect_to_plot[type][i][A_arg,:],axis=0),spect_to_plot[type][i].shape[1])
-                        ax.plot(axis[type]['ekin'][i], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$")
+                        ax.plot(axis[type]['ekin'][i], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
                 XMax = np.nanmax(axis[type]['ekin']) if XMax is None else XMax
                 YMax = np.nanmax(spect_to_plot[type]) if YMax is None else YMax
                 ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, YMax if YMax > 0 else 1e16), yscale='log',
@@ -611,6 +634,282 @@ class Process():
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                 print(f"\nMovies saved in {self.pros_path}")
+
+    def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if Species is None  and (E_las is False and E_avg is False):
+                raise ValueError("No species or field were provided")
+            if Species is not None and not isinstance(Species, list):
+                Species = [Species]
+                for type in Species:
+                    self.DiagCheck(f"Derived_Number_Density_{type}")
+            if E_las:
+                self.DiagCheck(f"Electric_Field_{E_las}")
+            if E_avg:
+                self.DiagCheck(f"Electric_Field_{E_avg}_averaged")
+            if self.Log:
+                if Species is not None and (E_las or E_avg):
+                    print(f"\nPlotting {[f'{s}' for s in Species]} densities and{f' {E_las}' if E_las else ''}{' and' if E_las and E_avg else ''}{f' {E_avg}' if E_avg else ''} field lineouts")
+                elif Species is not None:
+                    print(f"\nPlotting {[f'{s}' for s in Species]} densities lineouts")
+                else:
+                    print(f"\nPlotting {E_las if E_las else E_avg} field lineouts")
+            if File is None:
+                SaveFile = "lineout"
+                if E_las:
+                    SaveFile=f"{E_las}_{SaveFile}" 
+                elif E_avg:
+                    SaveFile=f"{E_avg}_avg_{SaveFile}"
+                if Species is not None:
+                    if len(Species) == 1:
+                        SaveFile=f"{Species[0]}_{SaveFile}"
+                    else:
+                        SaveFile=f"{'_'.join(Species)}_{SaveFile}"
+            else: SaveFile = File
+            tasks = [(i, self, 'LineOut', Species, E_las, E_avg, FSpot, FMax, YMin, YMax, XMin, XMax, SaveFile) for i in range(self.LenSim)]
+            done = 0
+            last_idx = -1
+            with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                try:
+                    for fut in as_completed(futs):
+                        i, err, tb = fut.result()
+                        if err:
+                            Print_Error(futs, ex, i, err, tb)
+                        else:
+                            done += 1
+                            # keep your existing percentage display
+                            idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                            if idx_equiv != last_idx:
+                                if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                last_idx = idx_equiv
+                finally:
+                    # make sure we don't block on shutdown; it's idempotent
+                    ex.shutdown(wait=False, cancel_futures=True)
+            print(f"\nLineouts saved in {self.raw_path}")
+            if self.Movie:
+                MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                print(f"\nMovies saved in {self.pros_path}")
+            
+        elif MultiPros:
+            
+            fig, ax = plt.subplots(clear=True, figsize=(8,6))
+            lnf = None
+            den_to_plot={}
+            axis={}
+            if E_las:
+                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, Iter, dx=1, dy=1)
+            elif E_avg:
+                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Iter, Averaged=True, dx=1, dy=1)
+            if Species is not None:
+                for type in Species:
+                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, Iter, dx=1, dy=1)
+            xmax = np.max(E_axis['x']) if E_las or E_avg else np.max(axis[Species[0]]['x'])
+            xmin = np.min(E_axis['x']) if E_las or E_avg else np.min(axis[Species[0]]['x'])
+            ax.set(xlabel='x [μm]', xlim=(xmin if XMin is None else XMin, xmax if XMax is None else XMax),
+                   title=f"{E_axis['Time']}fs" if E_las or E_avg else f"{axis[Species[0]]['Time']}fs")
+            if Species:
+                ax.set(ylabel='N [$N_c$]', yscale='log', ylim=(1e-2 if YMin is None else YMin, 1e3 if YMax is None else YMax))
+                for type in Species:
+                    if self.Dim == 1:
+                        lns = ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}", color=self.Colours[type] if type in self.Colours.keys() else None)
+                        ax.fill_between(axis[type]['x'], den_to_plot[type], 1e-2 if YMin is None else YMin, color=self.Colours[type] if type in self.Colours.keys() else None, alpha=0.2)
+                    elif self.Dim > 1:
+                        if FSpot != 0: args = np.argwhere(abs(axis[type]['y']) <= FSpot/2)
+                        else: args = np.argwhere(abs(axis[type]['y']) <= np.min(abs(axis[type]['y'])))
+                        lns = ax.plot(axis[type]['x'], np.mean(den_to_plot[type][:, args], axis=1), label=f"{type}", color=self.Colours[type] if type in self.Colours.keys() else None)
+                        ax.fill_between(axis[type]['x'], np.reshape(np.mean(den_to_plot[type][:, args], axis=1), axis[type]['x'].shape), 1e-2 if YMin is None else YMin, color=self.Colours[type] if type in self.Colours.keys() else None, alpha=0.2)
+                    lnf = lns if lnf is None else lnf + lns
+
+            if E_las or E_avg:
+                ax2 = ax.twinx() if Species else ax
+                ax2.set(ylim=(-np.nanmax(abs(E_data)) if FMax is None else -FMax, np.nanmax(abs(E_data)) if FMax is None else FMax), ylabel=f"{E_las if E_las else E_avg} [{ 'V/m' if (['E' in E_las] if E_las else ['E' in E_avg]) else 'T'}]")
+                if self.Dim == 1:
+                    lns = ax2.plot(E_axis['x'], E_data, 'k--' if E_las else 'r', label=E_las if E_las else E_avg)
+                elif self.Dim > 1:
+                    if FSpot != 0: Ex_arg = np.argwhere(abs(E_axis['y']) <= FSpot/2)
+                    else: Ex_arg = np.argwhere(abs(E_axis['y']) <= np.min(abs(E_axis['y'])))
+                    lns = ax2.plot(E_axis['x'], np.mean(E_data[:, Ex_arg], axis=1), 'k--' if E_las else 'r', label=E_las if E_las else E_avg)
+                lnf = lns if lnf is None else lnf + lns
+            labs = [l.get_label() for l in lnf]
+            if Species: ax.legend(lnf, labs)
+            else: ax2.legend(lnf, labs)
+            fig.tight_layout()
+            plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+            plt.close(fig)
+
+    def EnergyTimePlot(self, Species=[], XMin=None, XMax=None, YMin=None, YMax=None, File=None, Z=None):
+        if not Species:
+            raise ValueError("No species were provided")
+        if not isinstance(Species, list):
+            Species = [Species]
+        for type in Species:
+            self.DiagCheck(f"dist_fn_x_energy_{type}")
+        if XMin is not None and abs(XMin) < 1:
+            XMin = XMin*1e15
+        if XMax is not None and abs(XMax) < 1:
+            XMax = XMax*1e15
+        spect_to_plot={}
+        axis={}
+        fig, ax = plt.subplots(clear=True, figsize=(8,6))
+        fig2, ax2 = plt.subplots(clear=True, figsize=(8,6))
+        if self.Log: print(f"\nPlotting {Species} energy time")
+
+        for type in Species:
+            SaveFile= f"{type}" if type == Species[0] else SaveFile + f"_{type}" 
+            spect_to_plot[type], axis[type] = self.SpectraPlot(Species=type, Z=Z, DataOnly=True)
+            ax.plot(axis[type]['Time'], np.nanmax(spect_to_plot[type], axis=1), label=type, color=self.Colours[type] if type in self.Colours.keys() else None)
+            ax2.plot(axis[type]['Time'][1:], np.diff(np.nanmax(spect_to_plot[type], axis=1))/np.diff(axis[type]['Time']), label=type, color=self.Colours[type] if type in self.Colours.keys() else None)
+        if YMax is None:
+            ymax = np.nanmax([np.nanmax(spect_to_plot[t], axis=1) for t in Species])
+
+        ax.set(xlabel='Time [fs]', xlim=(np.min(axis[Species[0]]['Time']) if XMin is None else XMin, np.max(axis[type]['Time']) if XMax is None else XMax),
+               ylabel='Max Energy [MeV]', ylim=(0 if YMin is None else YMin, ymax if YMax is None else YMax),
+               title=f"Maximum energy vs time")
+        ax.grid()
+        ax.legend()
+        ax2.set(xlabel='Time [fs]', xlim=(np.min(axis[Species[0]]['Time']) if XMin is None else XMin, np.max(axis[type]['Time']) if XMax is None else XMax),
+               ylabel='dE/dt [MeV/fs]', ylim=(0, None),
+               title=f"Energy rate vs time")
+        ax2.grid()
+        ax2.legend()
+        fig.tight_layout()
+        fig2.tight_layout()
+        fig.savefig(self.pros_path + '/' + SaveFile + '_energy_time.png',dpi=200)
+        plt.close(fig)
+        fig2.savefig(self.pros_path + '/' + SaveFile + '_energy_time_deriv.png',dpi=200)
+        plt.close(fig2)
+        print(f"\nEnergy time plots saved in {self.pros_path}")
+
+    def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if not Species:
+                raise ValueError("No species were provided")
+            if Phase is None:
+                print("No phase space were provided! Defaulting to x-px")
+                Phase = 'x-px'
+            if not isinstance(Species, list):
+                Species = [Species]
+            for type in Species:
+                self.DiagCheck(f"dist_fn_{Phase}_{type}")
+            if XMin is not None:
+                if not isinstance(XMin, list):
+                    XMin = [XMin]
+                if len(XMin) < len(Species):
+                    if len(XMin) != 1:
+                        raise ValueError("XMin must be a list of the same length as Species or a single value")
+                    else: XMin = XMin * len(Species)
+            if XMax is not None:
+                if not isinstance(XMax, list):
+                    XMax = [XMax]
+                if len(XMax) < len(Species):
+                    if len(XMax) != 1:
+                        raise ValueError("XMax must be a list of the same length as Species or a single value")
+                    else: XMax = XMax * len(Species)
+            if YMin is not None:
+                if not isinstance(YMin, list):
+                    YMin = [YMin]
+                if len(YMin) < len(Species):
+                    if len(YMin) != 1:
+                        raise ValueError("YMin must be a list of the same length as Species or a single value")
+                    else: YMin = YMin * len(Species)
+            if YMax is not None:
+                if not isinstance(YMax, list):
+                    YMax = [YMax]
+                if len(YMax) < len(Species):
+                    if len(YMax) != 1:
+                        raise ValueError("YMax must be a list of the same length as Species or a single value")
+                    else: YMax = YMax * len(Species)
+            if CBMin is not None:
+                if not isinstance(CBMin, list):
+                    CBMin = [CBMin]
+                if len(CBMin) < len(Species):
+                    if len(CBMin) != 1:
+                        raise ValueError("CBMin must be a list of the same length as Species or a single value")
+                    else: CBMin = CBMin * len(Species)
+            if CBMax is not None:
+                if not isinstance(CBMax, list):
+                    CBMax = [CBMax]
+                if len(CBMax) < len(Species):
+                    if len(CBMax) != 1:
+                        raise ValueError("CBMax must be a list of the same length as Species or a single value")
+                    else: CBMax = CBMax * len(Species)
+            for type in Species:
+                if File is None:
+                    SaveFile=f"{Species[0]}_{Phase}_phase"
+                else: SaveFile = File
+                tmp_xmin = XMin[Species.index(type)] if XMin is not None else None
+                tmp_xmax = XMax[Species.index(type)] if XMax is not None else None
+                tmp_ymin = YMin[Species.index(type)] if YMin is not None else None
+                tmp_ymax = YMax[Species.index(type)] if YMax is not None else None
+                tmp_cbmin = CBMin[Species.index(type)] if CBMin is not None else None
+                tmp_cbmax = CBMax[Species.index(type)] if CBMax is not None else None
+                if self.Log: print(f"\nPlotting {type} phase space {Phase}")
+                tasks = [(i, self, 'PhaseSpacePlot', type, Phase, tmp_cbmin, tmp_cbmax, tmp_ymin, tmp_ymax, tmp_xmin, tmp_xmax, SaveFile, Z) for i in range(self.LenSim)]
+                done = 0
+                last_idx = -1
+                with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                    futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                    try:
+                        for fut in as_completed(futs):
+                            i, err, tb = fut.result()
+                            if err:
+                                Print_Error(futs, ex, i, err, tb)
+                            else:
+                                done += 1
+                                # keep your existing percentage display
+                                idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                                if idx_equiv != last_idx:
+                                    if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                    last_idx = idx_equiv
+                    finally:
+                        # make sure we don't block on shutdown; it's idempotent
+                        ex.shutdown(wait=False, cancel_futures=True)
+
+                print(f"\nPhase spaces saved in {self.raw_path}")
+                if self.Movie:
+                    MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                    print(f"\nMovies saved in {self.pros_path}")
+        elif MultiPros:
+            type = Species
+            fig, ax = plt.subplots(clear=True, figsize=(8,6))
+            phase_axis = Phase.split('_')
+            if 'energy' in phase_axis:
+                phase_axis[phase_axis.index('energy')] = 'ekin'
+            clabel1 = 'dN/'
+            clabel2 = ' [particles/'
+            if 'p' in phase_axis[0]:
+                xlabel = 'p' + phase_axis[0][1:] + ' [kgm/s]'
+                clabel1 += 'dP'
+                clabel2 += '(kgm/s '
+            else:
+                xlabel = phase_axis[0] + ' [μm]'
+                clabel1 += 'dx'
+                clabel2 += '(μm '
+            if 'ekin' in phase_axis[1]:
+                ylabel = 'E [MeV]'
+                clabel1 += 'dE'
+                clabel2 += 'MeV)]'
+            else:
+                ylabel = 'p' + phase_axis[1][1:] + ' [kgm/s]'
+                clabel1 += 'dP'
+                clabel2 += 'kgm/s)]'
+            phase_to_plot, axis = self.GetData(f"dist_fn_{Phase}", type, phase_axis, Iter, Z=Z)
+            cmin = CBMin if CBMin is not None else np.nanmin(phase_to_plot[phase_to_plot>0]) if np.nanmin(phase_to_plot[phase_to_plot>0]) > 1e5 else 1e5
+            cmax = CBMax if CBMax is not None else np.nanmax(phase_to_plot) if np.nanmax(phase_to_plot) > 1e9 else 1e9
+            cax = ax.pcolormesh(axis[phase_axis[0]], axis[phase_axis[1]], phase_to_plot.T, cmap=cmaps.batlowW, norm=cm.LogNorm(vmin=cmin, vmax=cmax))
+            cbar = fig.colorbar(cax, aspect=50, label=clabel1 + clabel2)
+            xmax = np.nanmax(axis[phase_axis[0]]) if XMax is None else XMax
+            xmin = np.nanmin(axis[phase_axis[0]]) if XMin is None else XMin
+            ymax = np.nanmax(axis[phase_axis[1]]) if YMax is None else YMax
+            ymin = np.nanmin(axis[phase_axis[1]]) if not phase_axis[1]=='ekin' else 0 if YMin is None else YMin
+            ax.set(xlabel=xlabel, xlim=(xmin, xmax),
+                   ylabel=ylabel, ylim=(ymin, ymax),
+                   title=f"{axis['Time']}fs")
+            ax.grid()
+            fig.tight_layout()
+            plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+            plt.close(fig)
 
     def LasIonFrontPlot(self, FSpot=1.0, EMax=None, XMin=None, XMax=None, dx=1, dy=1, File=None):
         SaveFile=File if File is not None else "Las_Ion_Front"

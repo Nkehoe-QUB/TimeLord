@@ -1,3 +1,5 @@
+class RemoteError(Exception): pass
+
 def Gau(x,a,b,c):
     import numpy as np
     return a*np.exp(-(x-b)**2/(2.*(c**2)))
@@ -509,8 +511,22 @@ def convert_one(args):
         return (i, e)     # failure
 
 def Iter_Plot(args):
+    import traceback
     try:
         getattr(args[1], args[2])(*args[3:], MultiPros=True, Iter=args[0])
-        return (args[0], None)  # success
-    except Exception as e:
-        return (args[0], e)     # failure
+        return (args[0], None, None)  # success
+    except BaseException as e:
+        tb = traceback.format_exc()
+        err = f"{type(e).__name__}: {e}"
+        return (args[0], err, tb)
+
+def Print_Error(futs, ex, i, err, tb):
+    # cancel everything that hasn’t started yet
+    for f in futs:
+        f.cancel()
+    # do NOT wait for the pool to finish
+    ex.shutdown(wait=False, cancel_futures=True)
+    raise RuntimeError(f"Error processing file {i:04d}.h5\n"
+                       f"{err}\n\n"
+                       f"--- Remote traceback (child) ---\n{tb}"
+                       )
