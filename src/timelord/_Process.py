@@ -14,7 +14,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error
 
 class Process():
-    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True):
+    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True, Prefix=None):
         ########### Constants ##################################
         self.c = 299792458. 
         self.me = 9.11e-31
@@ -39,14 +39,22 @@ class Process():
         self.Test = Test
         self.Colours = {'electron': 'r', 'proton': 'b', 'carbon': 'k'}
         self.workers = pick_safe_workers()
+        self.FilePrefix = False
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
         Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
-        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/*.sdf')])
-        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/*.h5')])
+        if len([i for i in glob.glob(f'{self.SimulationPath}/*.visit')]) > 1 and Prefix is None and f'{self.SimulationPath}/0000.h5' not in os.listdir(self.SimulationPath):
+            raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
+        if Prefix:
+            with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
+                text = f.readlines()
+                if len(text[0].replace('\n','').split('.')[0]) > 4:
+                    self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
+        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')])
+        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')])
         if LenSDF == 0:
             if LenHDF == 0:
                 raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
@@ -55,11 +63,11 @@ class Process():
             Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
         else: 
             ConvData = True
-            self.LenSim = LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
+            self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF -1 if LenSDF != LenHDF else LenSDF
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
-            
-            tasks = [(i, self.SimulationPath, DelData, bool(self.Test)) for i in range(self.LenSim)]
+
+            tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -122,8 +130,9 @@ class Process():
                 self.Tau = 0
         omega_las = 2.*np.pi*self.c / lambda_las if l_found else 1
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
-        with h5py.File(os.path.join(self.SimulationPath, '0000.h5'), 'r') as file:
-            self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+        with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
+            try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+            except: self.Dim = 2
         self.space_axis = self.space_axis[:self.Dim]
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*np.sqrt(np.log(2)))))/self.femto
         if Ped is not None: 
@@ -155,12 +164,16 @@ class Process():
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
         Axis = {axis: [] for axis in AxisNames}
+        rel_elec = False
+        if Name == "rel electron":
+            rel_elec = True
+            Name = "electron"
         attr = Diag + "_" + Name
         if Averaged:
             attr += "_averaged"
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
-        File = h5py.File(os.path.join(self.SimulationPath, f"{t:04d}.h5"), 'r')
+        File = h5py.File(os.path.join(self.SimulationPath, f"{"" if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
         try: File[f"SDF/{attr}"]
         except KeyError:
             File.close()
@@ -204,7 +217,7 @@ class Process():
                 raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
             if dx != 1:
                 Den = Den[np.s_[::dx, ::dy]]
-            if Name == "rel electron density":
+            if rel_elec:
                 RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
                 Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                 Den = Den / Gamma
@@ -236,7 +249,11 @@ class Process():
             if Species and not isinstance(Species, list):
                 Species = [Species]
                 for type in Species:
-                    if not EkBar: self.DiagCheck(f"Derived_Number_Density_{type}")
+                    if not EkBar:
+                        if type == "rel electron":
+                            self.DiagCheck("Derived_Average_Particle_Energy_electron")
+                            self.DiagCheck("Derived_Number_Density_electron")
+                        else: self.DiagCheck(f"Derived_Number_Density_{type}")
                     else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if E_las:
                 self.DiagCheck(f"Electric_Field_{E_las}")
@@ -528,7 +545,7 @@ class Process():
                     SaveFile = f"{type}_angles"
                 else: SaveFile = File
                 tmp_max = XMax[Species.index(type)] if XMax is not None else None
-                tasks = [(i, self, 'AnglePlot', [type], CBMin, CBMax, tmp_max, YMin, YMax, LasAngle, Integrate, SaveFile, Z) for i in range(self.LenSim)]
+                tasks = [(i, self, 'AnglePlot', type, CBMin, CBMax, tmp_max, YMin, YMax, LasAngle, Integrate, SaveFile, Z) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 if self.Log: print(f"\nPlotting {type} angles")
@@ -556,30 +573,28 @@ class Process():
                     print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
-            type = Species[0]
+            type = Species
             fig, ax = plt.subplots(clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
-            for i in range(self.LenSim):
-                angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
-                try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowW_r, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
-                except ValueError: 
-                    print(np.max(axis['theta']),np.max(axis['ekin']))
-                    cax = ax.pcolormesh(axis['theta'],axis['ekin'], np.zeros(angle_to_plot.T.shape), cmap=cmaps.batlowW_r, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
-                cbar = fig.colorbar(cax, aspect=50)
-                cbar.set_label('dNdE [arb. units]')
-                xmax = np.nanmax(axis['ekin']) if XMax is None else XMax[0]
-                if LasAngle is not None:
-                    ax.vlines(np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
-                if Integrate is not None:
-                    if LasAngle is not None: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), np.radians(LasAngle - Integrate) , np.radians(LasAngle + Integrate), color='r', alpha=0.2)
-                    else: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), -np.radians(Integrate), np.radians(Integrate), color='r', alpha=0.2)
-                ax.set(xlim=(-np.pi if YMin is None else YMin,np.pi if YMax is None else YMax),
-                        ylim=(0,xmax))
-                if YMax is None or YMax > np.pi/2:
-                    ax.set_rlabel_position(90)
-                fig.suptitle(f"{axis['Time']}fs")
-                fig.tight_layout()
-                plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
-                plt.close(fig)
+            angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
+            try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+            except ValueError: 
+                cax = ax.pcolormesh(axis['theta'],np.nan_to_num(axis['ekin'], neginf=0.0, posinf=XMax if XMax is not None else 100), angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+            cbar = fig.colorbar(cax, aspect=50)
+            cbar.set_label('dNdE [arb. units]')
+            xmax = np.nanmax(axis['ekin']) if XMax is None else XMax
+            if LasAngle is not None:
+                ax.vlines(np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
+            if Integrate is not None:
+                if LasAngle is not None: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), np.radians(LasAngle - Integrate) , np.radians(LasAngle + Integrate), color='r', alpha=0.2)
+                else: ax.fill_betweenx(np.linspace(0, xmax, axis['ekin'].shape[0]), -np.radians(Integrate), np.radians(Integrate), color='r', alpha=0.2)
+            ax.set(xlim=(-np.pi if YMin is None else YMin,np.pi if YMax is None else YMax),
+                    ylim=(0,xmax))
+            if YMax is None or YMax > np.pi/2:
+                ax.set_rlabel_position(90)
+            fig.suptitle(f"{axis['Time']}fs")
+            fig.tight_layout()
+            plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+            plt.close(fig)
 
     def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, DataOnly=False):
         if not Species:

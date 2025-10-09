@@ -499,8 +499,8 @@ def convert_one(args):
     Separate top-level function so it can be pickled by multiprocessing.
     """
     import os
-    (i, sim_path, del_data, verbose) = args
-    src = os.path.join(sim_path, f"{i:04d}.sdf")
+    (i, sim_path, del_data, verbose, fp) = args
+    src = os.path.join(sim_path, f"{'' if not fp else fp}{i:04d}.sdf")
     try:
         # Import inside the worker to avoid pickling issues
         if verbose:
