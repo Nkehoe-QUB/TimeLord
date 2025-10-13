@@ -585,6 +585,7 @@ class Process():
             cbar = fig.colorbar(cax, aspect=50)
             cbar.set_label('dNdE [arb. units]')
             xmax = np.nanmax(axis['ekin']) if XMax is None else XMax
+            if xmax > 1e6: xmax=1e3
             if LasAngle is not None:
                 ax.vlines(np.radians(LasAngle), 0, xmax, colors='r', linestyles='dashed')
             if Integrate is not None:
@@ -918,11 +919,11 @@ class Process():
             cmin = CBMin if CBMin is not None else np.nanmin(phase_to_plot[phase_to_plot>0]) if np.nanmin(phase_to_plot[phase_to_plot>0]) > 1e5 else 1e5
             cmax = CBMax if CBMax is not None else np.nanmax(phase_to_plot) if np.nanmax(phase_to_plot) > 1e9 else 1e9
             cax = ax.pcolormesh(axis[phase_axis[0]], axis[phase_axis[1]], phase_to_plot.T, cmap=cmaps.batlowW, norm=cm.LogNorm(vmin=cmin, vmax=cmax))
-            cbar = fig.colorbar(cax, aspect=50, label=clabel1 + clabel2)
-            xmax = np.nanmax(axis[phase_axis[0]]) if XMax is None else XMax
-            xmin = np.nanmin(axis[phase_axis[0]]) if XMin is None else XMin
-            ymax = np.nanmax(axis[phase_axis[1]]) if YMax is None else YMax
-            ymin = np.nanmin(axis[phase_axis[1]]) if not phase_axis[1]=='ekin' else 0 if YMin is None else YMin
+            fig.colorbar(cax, aspect=50, label=clabel1 + clabel2)
+            xmax = XMax if XMax is not None else np.nanmax(axis[phase_axis[0]])
+            xmin = XMin if XMin is not None else np.nanmin(axis[phase_axis[0]])
+            ymax = YMax if YMax is not None else np.nanmax(axis[phase_axis[1]])
+            ymin = YMin if YMin is not None else 0 if phase_axis[1]=='ekin' else np.nanmin(axis[phase_axis[1]]) 
             ax.set(xlabel=xlabel, xlim=(xmin, xmax),
                    ylabel=ylabel, ylim=(ymin, ymax),
                    title=f"{axis['Time']}fs")
