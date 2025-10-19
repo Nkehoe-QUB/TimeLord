@@ -242,9 +242,9 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, Field_avg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
-            if not Species and (Field and Field_avg) is None:
+            if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
             if Species and not isinstance(Species, list):
                 Species = [Species]
@@ -257,8 +257,8 @@ class Process():
                     else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if Field:
                 self.DiagCheck(f"Electric_Field_{Field}")
-            if Field_avg:
-                self.DiagCheck(f"Electric_Field_{Field_avg}_averaged")
+            if FieldAvg:
+                self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
             if Colours is not None and not isinstance(Colours, list):
                 if not isinstance(Colours, str):
                     raise ValueError("Colours must be a list of strings")
@@ -269,14 +269,14 @@ class Process():
                     Colours = None
                 else: Colours = [Colours]
             if self.Log:
-                if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities and/or {Field if Field else Field_avg} field data only")
+                if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities and/or {Field if Field else FieldAvg} field data only")
                 else:
-                    if Species: print(f"\nPlotting {[f'{s}' for s in Species]} {'average energy 'if EkBar else ''}densities{f' and {Field if Field else Field_avg} field' if Field or Field_avg else ''}")
-                    else: print(f"\nPlotting {Field if Field else Field_avg} field")
+                    if Species: print(f"\nPlotting {[f'{s}' for s in Species]} {'average energy 'if EkBar else ''}densities{f' and {Field if Field else FieldAvg} field' if Field or FieldAvg else ''}")
+                    else: print(f"\nPlotting {Field if Field else FieldAvg} field")
             if DataOnly:
                 to_include = Species if Species else []
                 if Field: to_include.append(Field)
-                if Field_avg: to_include.append(Field_avg)
+                if FieldAvg: to_include.append(FieldAvg)
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
                 for i in range(self.LenSim):
                     if Field:
@@ -284,11 +284,11 @@ class Process():
                         to_return[Field]['data'].append(E_data)
                         for k, v in E_axis.items():
                             to_return[Field]['axis'][k].append(v)
-                    elif Field_avg:
-                        E_data, E_axis = self.GetData("Electric_Field", Field_avg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
-                        to_return[Field_avg]['data'].append(E_data)
+                    elif FieldAvg:
+                        E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
+                        to_return[FieldAvg]['data'].append(E_data)
                         for k, v in E_axis.items():
-                            to_return[Field_avg]['axis'][k].append(v)
+                            to_return[FieldAvg]['axis'][k].append(v)
                     if Species:
                         for type in Species:
                             den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, i, dx=dx, dy=dy)
@@ -305,15 +305,15 @@ class Process():
                 SaveFile = "density" if not EkBar else "energy_density"
                 if Field:
                     SaveFile=f"{Field}_{SaveFile}"
-                elif Field_avg:
-                    SaveFile=f"{Field_avg}_avg_{SaveFile}"
+                elif FieldAvg:
+                    SaveFile=f"{FieldAvg}_avg_{SaveFile}"
                 if Species:
                     if len(Species) == 1:
                         SaveFile=f"{Species[0]}_{SaveFile}"
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, Field_avg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -345,19 +345,19 @@ class Process():
             axis={}
             if Field:
                 E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-            elif Field_avg:
-                E_data, E_axis = self.GetData("Electric_Field", Field_avg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+            elif FieldAvg:
+                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
 
             if self.Dim > 1:
-                if Field or Field_avg:
-                    E = Field if Field else Field_avg
+                if Field or FieldAvg:
+                    E = Field if Field else FieldAvg
                     FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if EMax is None else EMax))
                     cbar1 = fig.colorbar(cax1, aspect=50)
-                    cbar1.set_label(f"{Field if Field else Field_avg} [{FUnit}]")
+                    cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
@@ -368,7 +368,7 @@ class Process():
                                 warnings.simplefilter("ignore", category=RuntimeWarning)
                                 den_to_plot[type][den_to_plot[type]<1e-1]=np.nan
                                 cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.Normalize(vmin=0.0 if CBMin is None else CBMin, vmax=np.nanmax(den_to_plot[type].T) if CBMax is None else CBMax))
-                        if (Colours is not None) and (len(Colours) > 1) and (not Field or not Field_avg):
+                        if (Colours is not None) and (len(Colours) > 1) and (not Field or not FieldAvg):
                             cbar=fig.colorbar(cax, aspect=50)
                             cbar.set_label(f"N$_{{{type}}}$ {'[$N_c$]' if not EkBar else '[MeV]'}")
                     if ((Colours is None) or (len(Colours) == 1)):
@@ -376,16 +376,16 @@ class Process():
                         cbar.set_label('N [$N_c$]')
                 ax.set_ylabel(r'y [$\mu$m]')
             elif self.Dim == 1:
-                if Field or Field_avg:
-                    E = Field if Field else Field_avg
+                if Field or FieldAvg:
+                    E = Field if Field else FieldAvg
                     FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     if not Species:
-                        ax.plot(E_axis['x'], E_data, label=Field if Field else Field_avg)
-                        ax.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else Field_avg} [{FUnit}]")
+                        ax.plot(E_axis['x'], E_data, label=Field if Field else FieldAvg)
+                        ax.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                     else:
                         ax2 = ax.twinx()
-                        ax2.plot(E_axis['x'], E_data, 'r', label=Field if Field else Field_avg)
-                        ax2.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else Field_avg} [{FUnit}]")
+                        ax2.plot(E_axis['x'], E_data, 'r', label=Field if Field else FieldAvg)
+                        ax2.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
