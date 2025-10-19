@@ -173,7 +173,7 @@ class Process():
             attr += "_averaged"
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
-        File = h5py.File(os.path.join(self.SimulationPath, f"{"" if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
+        File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
         try: File[f"SDF/{attr}"]
         except KeyError:
             File.close()
@@ -648,7 +648,7 @@ class Process():
                 fig.tight_layout()
                 plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
                 if self.Log: 
-                    PrintPercentage(i, self.TimeSteps.size -1 )
+                    PrintPercentage(i, self.LenSim -1 )
             print(f"\nAngle energies saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
