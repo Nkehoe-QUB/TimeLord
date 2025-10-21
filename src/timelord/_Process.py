@@ -1,6 +1,6 @@
 import numpy as np
 from cmcrameri import cm as cmaps
-import matplotlib, os, re, glob, h5py, pyfiglet, warnings
+import matplotlib, os, re, glob, h5py, pyfiglet
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.rcParams["axes.labelsize"] = 16
@@ -11,7 +11,7 @@ plt.rcParams["legend.fontsize"] = 14
 import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from ._Utils import Gau, getFWHM, getCDSurf, GoTrans, PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error
+from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True, Prefix=None):
@@ -242,7 +242,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, EMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
             if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
@@ -313,7 +313,7 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, EMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -352,28 +352,34 @@ class Process():
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
 
             if self.Dim > 1:
-                if Field or FieldAvg:
-                    E = Field if Field else FieldAvg
-                    FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
-                    cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if EMax is None else EMax))
-                    cbar1 = fig.colorbar(cax1, aspect=50)
-                    cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
+                        if type == 'rel electron' and not EkBar and CBMin is None:
+                            CBMin = 1e0
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
                         if not EkBar:
-                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
+                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]),
+                                              norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax), zorder=1+Species.index(type))
                         else:
-                            with warnings.catch_warnings():
-                                warnings.simplefilter("ignore", category=RuntimeWarning)
-                                den_to_plot[type][den_to_plot[type]<1e-1]=np.nan
-                                cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]), norm=cm.Normalize(vmin=0.0 if CBMin is None else CBMin, vmax=np.nanmax(den_to_plot[type].T) if CBMax is None else CBMax))
+                                cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]),
+                                                  norm=cm.Normalize(vmin=0.0 if CBMin is None else CBMin, vmax=np.nanmax(den_to_plot[type].T) if CBMax is None else CBMax), zorder=1+Species.index(type))
                         if (Colours is not None) and (len(Colours) > 1) and (not Field or not FieldAvg):
                             cbar=fig.colorbar(cax, aspect=50)
                             cbar.set_label(f"N$_{{{type}}}$ {'[$N_c$]' if not EkBar else '[MeV]'}")
                     if ((Colours is None) or (len(Colours) == 1)):
                         cbar=fig.colorbar(cax, aspect=50)
                         cbar.set_label('N [$N_c$]')
+                if Field or FieldAvg:
+                    base = cmaps.vik(np.linspace(0, 1, 256))
+                    # Make alpha transparent at center (0.5), opaque at edges
+                    alpha = 1 - (1 - np.abs(np.linspace(-1, 1, 256)) )**2   # Creates a peak at center
+                    base[:, -1] = alpha
+                    transparent_cmap = cm.ListedColormap(base)
+                    E = Field if Field else FieldAvg
+                    FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
+                    cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=transparent_cmap, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if FMax is None else FMax), zorder=len(Species)+1)
+                    cbar1 = fig.colorbar(cax1, aspect=50)
+                    cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 ax.set_ylabel(r'y [$\mu$m]')
             elif self.Dim == 1:
                 if Field or FieldAvg:
@@ -381,11 +387,11 @@ class Process():
                     FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     if not Species:
                         ax.plot(E_axis['x'], E_data, label=Field if Field else FieldAvg)
-                        ax.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax.set(ylim=(-np.nanmax(E_data) if FMax is None else -FMax, np.nanmax(E_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                     else:
                         ax2 = ax.twinx()
                         ax2.plot(E_axis['x'], E_data, 'r', label=Field if Field else FieldAvg)
-                        ax2.set(ylim=(-np.nanmax(E_data) if EMax is None else -EMax, np.nanmax(E_data) if EMax is None else EMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax2.set(ylim=(-np.nanmax(E_data) if FMax is None else -FMax, np.nanmax(E_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
@@ -481,7 +487,7 @@ class Process():
             XMax = np.nanmax([axis[type]['ekin'] for type in Species]) if XMax is None else XMax
             YMax = np.nanmax([spect_to_plot[type] for type in Species]) if YMax is None else YMax
             ax.set(xlabel='E [$MeV$]', xlim=(0,XMax if XMax > 0 else 0.1),
-                   ylabel='dNdE [arb. units]', ylim=(YMax/1e10 if YMin is None else YMin, YMax), yscale='log',
+                   ylabel='dNdE [arb. units]', ylim=(1e11 if YMin is None else YMin, YMax), yscale='log',
                    title=f"{axis[type]['Time']}fs")
             ax.grid(True)
             ax.legend()
@@ -579,9 +585,9 @@ class Process():
             type = Species
             fig, ax = plt.subplots(clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
             angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
-            try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+            try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e11 if CBMin is None else CBMin, vmax=1e16 if CBMax is None else CBMax))
             except ValueError: 
-                cax = ax.pcolormesh(axis['theta'],np.nan_to_num(axis['ekin'], neginf=0.0, posinf=XMax if XMax is not None else 100), angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e4 if CBMin is None else CBMin, vmax=1e10 if CBMax is None else CBMax))
+                cax = ax.pcolormesh(axis['theta'],np.nan_to_num(axis['ekin'], neginf=0.0, posinf=XMax if XMax is not None else 100), angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e11 if CBMin is None else CBMin, vmax=1e16 if CBMax is None else CBMax))
             cbar = fig.colorbar(cax, aspect=50)
             cbar.set_label('dNdE [arb. units]')
             xmax = np.nanmax(axis['ekin']) if XMax is None else XMax
@@ -600,59 +606,103 @@ class Process():
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
 
-    def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, DataOnly=False):
-        if not Species:
-            raise ValueError("No species were provided")
-        if not isinstance(Species, list):
-            Species = [Species]
-        if not isinstance(Angles, list):
-            Angles = [Angles]
-        if len(Angles) == 0:
-            Angles = [0,10]
-        spect_to_plot = {}
-        axis = {}
-        TempFile=File if File is not None else f"angles_energy"
-        for type in Species:
-            tmp = self.AnglePlot(type, DataOnly=True)
-            spect_to_plot[type], axis[type] = tmp[0], tmp[1]
+    def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, Data=None, Averaged=True, DataOnly=False, MultiPros=False, Iter=None):
+        if not MultiPros:
+            if not Species:
+                raise ValueError("No species were provided")
+            if not isinstance(Species, list):
+                Species = [Species]
+            if not isinstance(Angles, list):
+                Angles = [Angles]
+            if len(Angles) == 0:
+                Angles = [0,10]
 
-        if DataOnly:
-            if len(Angles) > 1:
-                raise ValueError("DataOnly can only be used with a single angle")
-            A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
-            if len(Species) == 1:
-                return np.reshape(np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1])), axis[Species[0]]
-                # return spect_to_plot[Species[0]], axis[Species[0]]
-            return {type : {'data': np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1])), 'axis': axis[type]} for type in Species}
+            if DataOnly:
+                if len(Angles) > 1:
+                    raise ValueError("DataOnly can only be used with a single angle")
+                if len(Species) == 1:
+                    to_return = {'data': [], 'axis': defaultdict(list)}
+                else:
+                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                spect_to_plot = {}
+                axis = {}
+                for type in Species:
+                    tmp = self.AnglePlot(type, DataOnly=True)
+                    spect_to_plot[type], axis[type] = tmp[0], tmp[1]
+                
+                if len(Species) == 1:
+                    A_arg = np.argwhere(abs(axis[Species[0]]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
+                    to_return['data'] = np.reshape(np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1]))
+                    to_return['axis'] = axis[Species[0]]
+                    return to_return['data'], to_return['axis']
+                else:
+                    for type in Species:
+                        A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
+                        to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1]))
+                        to_return[type]['axis'] = axis[type]
+                    return to_return
 
-        for type in Species:
-            if self.Log: print(f"\nPlotting {type} angle energies")
-            SaveFile= TempFile + f"_{type}" 
-
-            for i in range(self.LenSim):
-                fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
-                for j in Angles:
-                    if j == 0:
-                        A0_arg = np.argwhere(axis[type]['theta'][i]-np.radians(AngleOffset)==abs(axis[type]['theta'][i]-np.radians(AngleOffset)).min())[0]
-                        ax.plot(axis[type]["ekin"][i], np.reshape(spect_to_plot[type][i][A0_arg,:], axis[type]["ekin"][i].shape), label=r'$\theta$ $\equal$ 0$\degree$', color=self.Colours[type] if type in self.Colours.keys() else None)
-                    else:
-                        A_arg = np.argwhere(abs(axis[type]['theta'][i]-np.radians(AngleOffset))<=np.radians(j))
-                        A_energies = np.reshape(np.sum(spect_to_plot[type][i][A_arg,:],axis=0),spect_to_plot[type][i].shape[1])
-                        ax.plot(axis[type]['ekin'][i], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
-                XMax = np.nanmax(axis[type]['ekin']) if XMax is None else XMax
-                YMax = np.nanmax(spect_to_plot[type]) if YMax is None else YMax
-                ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, YMax if YMax > 0 else 1e16), yscale='log',
-                           xlabel='Energy [MeV/u]', xlim=(0, XMax if XMax > 0 else 0.1),
-                           title=f"{axis[type]['Time'][i]}fs")
-                ax.legend()
-                fig.tight_layout()
-                plt.savefig(self.raw_path + '/' + SaveFile + '_' + str(i) + '.png',dpi=200)
-                if self.Log: 
-                    PrintPercentage(i, self.LenSim -1 )
-            print(f"\nAngle energies saved in {self.raw_path}")
-            if self.Movie:
-                MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                print(f"\nMovies saved in {self.pros_path}")
+            for type in Species:
+                if File is None:
+                    SaveFile = f"{type}_angle_energies"
+                else: SaveFile = File
+                if self.Log: print(f"\nGetting {type} Angle data")
+                tmp = self.AnglePlot(type, DataOnly=True)
+                tasks = [(i, self, 'AngleEnergyPlot', type, AngleOffset, Angles, YMin, YMax, XMax, SaveFile, tmp, Averaged) for i in range(self.LenSim)]
+                done = 0
+                last_idx = -1
+                if self.Log: print(f"\nPlotting {type} angle energies")
+                with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                    futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                    try:
+                        for fut in as_completed(futs):
+                            i, err, tb = fut.result()
+                            if err:
+                                Print_Error(futs, ex, i, err, tb)
+                            else:
+                                done += 1
+                                # keep your existing percentage display
+                                idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                                if idx_equiv != last_idx:
+                                    if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                    last_idx = idx_equiv
+                    finally:
+                        # make sure we don't block on shutdown; it's idempotent
+                        ex.shutdown(wait=False, cancel_futures=True)
+                print(f"\nAngle energies saved in {self.raw_path}")
+                if self.Movie:
+                    MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                    print(f"\nMovies saved in {self.pros_path}")
+        
+        elif MultiPros:
+            fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
+            spect_to_plot = Data[0]
+            axis = Data[1]
+            type = Species
+            ymax = 0 if YMax is None else YMax
+            for j in Angles:
+                if j == 0:
+                    A0_arg = np.argwhere(axis['theta'][Iter]-np.radians(AngleOffset)==abs(axis['theta'][Iter]-np.radians(AngleOffset)).min())[0]
+                    if Averaged:
+                        A0_energies = MovingAverage(np.reshape(spect_to_plot[Iter][A0_arg,:], axis['ekin'][Iter].shape), 3)
+                    ax.plot(axis['ekin'][Iter], A0_energies, label=r'$\theta$ $\equal$ 0$\degree$', color=self.Colours[type] if type in self.Colours.keys() else None)
+                else:
+                    A_arg = np.argwhere(abs(axis['theta'][Iter]-np.radians(AngleOffset))<=np.radians(j))
+                    A_energies = np.reshape(np.sum(spect_to_plot[Iter][A_arg,:],axis=0),spect_to_plot[Iter].shape[1])
+                    if Averaged:
+                        A_energies = MovingAverage(A_energies, 3)
+                    if YMax is None :
+                        ymax= np.nanmax(A_energies) if np.nanmax(A_energies) > ymax else ymax
+                    ax.plot(axis['ekin'][Iter], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
+            xmax = np.nanmax(axis['ekin'][Iter]) if XMax is None else XMax
+            ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, ymax if ymax > 0 else 1e15), yscale='log',
+                    xlabel='Energy [MeV/u]', xlim=(0, xmax if not np.isinf(xmax) and xmax > 0 else 0.1),
+                    title=f"{axis['Time'][Iter]}fs")
+            ax.legend()
+            ax.grid()
+            fig.tight_layout()
+            plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
+            plt.close(fig)
 
     def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
         if not MultiPros:
