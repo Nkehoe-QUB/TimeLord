@@ -606,7 +606,7 @@ class Process():
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
 
-    def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, Data=None, Averaged=True, DataOnly=False, MultiPros=False, Iter=None):
+    def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, Z=1, Averaged=True, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
             if not Species:
                 raise ValueError("No species were provided")
@@ -627,7 +627,7 @@ class Process():
                 spect_to_plot = {}
                 axis = {}
                 for type in Species:
-                    tmp = self.AnglePlot(type, DataOnly=True)
+                    tmp = self.AnglePlot(type, DataOnly=True, Z=Z)
                     spect_to_plot[type], axis[type] = tmp[0], tmp[1]
                 
                 if len(Species) == 1:
@@ -646,9 +646,7 @@ class Process():
                 if File is None:
                     SaveFile = f"{type}_angle_energies"
                 else: SaveFile = File
-                if self.Log: print(f"\nGetting {type} Angle data")
-                tmp = self.AnglePlot(type, DataOnly=True)
-                tasks = [(i, self, 'AngleEnergyPlot', type, AngleOffset, Angles, YMin, YMax, XMax, SaveFile, tmp, Averaged) for i in range(self.LenSim)]
+                tasks = [(i, self, 'AngleEnergyPlot', type, AngleOffset, Angles, YMin, YMax, XMax, SaveFile, Z, Averaged) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 if self.Log: print(f"\nPlotting {type} angle energies")
@@ -676,9 +674,8 @@ class Process():
         
         elif MultiPros:
             fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
-            spect_to_plot = Data[0]
-            axis = Data[1]
             type = Species
+            spect_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
             ymax = 0 if YMax is None else YMax
             for j in Angles:
                 if j == 0:
