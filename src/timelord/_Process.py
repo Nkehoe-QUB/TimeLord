@@ -11,10 +11,10 @@ plt.rcParams["legend.fontsize"] = 14
 import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error, get_available_memory
+from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation,convert_one, pick_safe_workers, Iter_Plot, Print_Error, get_available_memory, AverageField, reconstruct_2d
 
 class Process():
-    def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True, Prefix=None):
+    def __init__(self, SimName=".", Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
         ########### Constants ##################################
         self.c = 299792458. 
         self.me = 9.11e-31
@@ -40,6 +40,9 @@ class Process():
         self.Colours = {'electron': 'r', 'proton': 'b', 'carbon': 'k'}
         self.workers = pick_safe_workers()
         self.FilePrefix = False
+        self.Geo = Geo
+        if self.Geo not in ['cart', 'cyl']:
+            raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
         AvailMem = get_available_memory()
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
@@ -47,16 +50,37 @@ class Process():
         Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
         Message += f"Available memory is \033[1;33m{AvailMem/1e9:.2f}\033[0m GB\n" if AvailMem is not None else "\033[1;31mCould not determine available memory\033[0m\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
+        visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
 
-        if len([i for i in glob.glob(f'{self.SimulationPath}/*.visit')]) > 1 and Prefix is None and f'{self.SimulationPath}/0000.h5' not in os.listdir(self.SimulationPath):
+        if len(visit_files) > 1 and Prefix is None and 'average.visit' not in visit_files: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
             raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
+        if 'average.visit' in visit_files:
+            with open(os.path.join(self.SimulationPath, f'average.visit'), 'r') as f:
+                text = f.readlines()
+                self.AvgFilePrefix = text[0].replace('\n','').split('.')[0][:-4]
+                # AvgSDFFiles = [line.rstrip('\n') for line in f]
+            LenAvgSDF = len([int(i.split('/')[-1].split('.')[0].split(self.AvgFilePrefix)[-1]) for i in glob.glob(f'{self.SimulationPath}/{self.AvgFilePrefix}*.sdf')])
+            LenAvgHDF = len([int(i.split('/')[-1].split('.')[0].split(self.AvgFilePrefix)[-1]) for i in glob.glob(f'{self.SimulationPath}/{self.AvgFilePrefix}*.h5')])
+            if LenAvgSDF == 0:
+                ConvAvgData = False
+            else:
+                ConvAvgData = True
+                LenAvgData = LenAvgSDF if LenAvgHDF==0 else LenAvgSDF + LenAvgHDF -1 if LenAvgSDF != LenAvgHDF else LenAvgSDF
         if Prefix:
             with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
                 text = f.readlines()
                 if len(text[0].replace('\n','').split('.')[0]) > 4:
                     self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
-        LenSDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')])
-        LenHDF = len([int(i.split('/')[-1].split('.')[0]) for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')])
+        LenSDF = len([
+            int(os.path.splitext(os.path.basename(i))[0])
+            for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
+            if not os.path.basename(i).startswith("avg")
+        ])
+        LenHDF = len([
+            int(os.path.splitext(os.path.basename(i))[0])
+            for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
+            if not os.path.basename(i).startswith("avg")
+        ])
         if LenSDF == 0:
             if LenHDF == 0:
                 raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
@@ -70,6 +94,11 @@ class Process():
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
 
             tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
+            total_tasks = self.LenSim
+            if ConvAvgData:
+                avg_tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.AvgFilePrefix) for i in range(LenAvgData)]
+                tasks.extend(avg_tasks)
+                total_tasks += LenAvgData
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -81,13 +110,14 @@ class Process():
                         raise
                     done += 1
                     # keep your existing percentage display
-                    idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                    idx_equiv = int((done - 1) * (total_tasks - 1) / max(1, total_tasks - 1))
                     if idx_equiv != last_idx:
-                        if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                        if self.Log: PrintPercentage(idx_equiv, total_tasks - 1)
                         last_idx = idx_equiv
             Message = "\n\n" + Message
 
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
+        Message += f"Simulation geometry set to \033[1;33m{'Cylindrical' if self.Geo == 'cyl' else 'Cartesian'}\033[0m\n"
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
@@ -154,15 +184,19 @@ class Process():
         if self.Log: print(Message)
 
     def DiagCheck(self, Diag):
-        File = h5py.File(os.path.join(self.SimulationPath, f"0000.h5"), 'r')
-        try: File[f"SDF/{Diag}"][:]
-        except:
+        if self.Geo == 'cart':
+            File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
+            try: File[f"SDF/{Diag}"][:]
+            except:
+                File.close()
+                raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
             File.close()
-            raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
-        File.close()
-        return True
+            return True
+        elif self.Geo == 'cyl':
+            print("Diagnostic check for cylindrical geometry not yet implemented")
+            return True
     
-    def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None):
+    def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None, n_avg=10, d_out=1):
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
         Axis = {axis: [] for axis in AxisNames}
@@ -176,10 +210,6 @@ class Process():
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
         File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
-        try: File[f"SDF/{attr}"]
-        except KeyError:
-            File.close()
-            raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
         Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
 
         for axis in AxisNames:
@@ -197,6 +227,8 @@ class Process():
                     Axis["x"] = Axis["x"][np.s_[::dx]]
             elif axis == "y":
                 Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
+                if self.Geo == 'cyl':
+                    Axis["y"] = np.linspace(-Axis["y"].max(), Axis["y"].max(), 2*len(Axis["y"]))
                 if dy != 1:
                     if dy == 0:
                         dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
@@ -213,16 +245,21 @@ class Process():
             Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
             print("Skipped averaging for the first file")
         else:
-            try: Den = File[f"SDF/{attr}"][:]
-            except KeyError:
-                File.close()
-                raise ValueError(f"Diagnostic '{attr}' is not a valid diagnostic")
-            if dx != 1:
-                Den = Den[np.s_[::dx, ::dy]]
-            if rel_elec:
-                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
-                Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
-                Den = Den / Gamma
+            if self.Geo == 'cyl' and Diag == "Electric_Field":
+                sim_axis = [File["SDF/Grid_Grid_mid/axis0"][:]/self.micro, File["SDF/Grid_Grid_mid/axis1"][:]/self.micro]
+                args = np.where(abs(Axis['y'])<0.5)[0]
+                if Averaged:
+                    Den = AverageField(self.SimulationPath, self.FilePrefix, t, sim_axis, [Axis['x'], Axis['y'], Axis['y'][args]], Name, n_avg=n_avg, d_out=d_out)
+                else:
+                    Den = reconstruct_2d(sim_axis, [Axis['x'], Axis['y'], Axis['y'][args]], field=attr, File=File)
+            else:
+                Den = File[f"SDF/{attr}"][:]
+                if dx != 1:
+                    Den = Den[np.s_[::dx, ::dy]]
+                if rel_elec:
+                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
+                    Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                    Den = Den / Gamma
             Data = Den
 
         if Diag == "Derived_Number_Density":
@@ -244,7 +281,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, n_avg=10, d_out=1, File=None, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
             if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
@@ -287,7 +324,7 @@ class Process():
                         for k, v in E_axis.items():
                             to_return[Field]['axis'][k].append(v)
                     elif FieldAvg:
-                        E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, i, Averaged=True, dx=dx, dy=dy)
+                        E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, i, Averaged=True, dx=dx, dy=dy, n_avg=n_avg, d_out=d_out)
                         to_return[FieldAvg]['data'].append(E_data)
                         for k, v in E_axis.items():
                             to_return[FieldAvg]['axis'][k].append(v)
@@ -348,7 +385,7 @@ class Process():
             if Field:
                 E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
             elif FieldAvg:
-                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy, n_avg=n_avg, d_out=d_out)
             if Species:
                 for type in Species:
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)

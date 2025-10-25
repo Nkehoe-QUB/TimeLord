@@ -667,3 +667,115 @@ def get_available_memory():
             pass
 
     return None
+
+def reconstruct_2d(sim, grid, field, File=None, Er_i=None, Er_r=None, Et_i=None, Et_r=None, Ex_i=None, Ex_r=None):
+    import numpy as np
+    x_sim, r_sim = sim
+    x, y, z = grid
+    if File is not None:
+        Er_i = np.array(File['SDF/Electric_Field_Modes_Erm_imag'][:], copy=True)
+        Er_r = np.array(File['SDF/Electric_Field_Modes_Erm_real'][:], copy=True)
+        Et_i = np.array(File['SDF/Electric_Field_Modes_Etm_imag'][:], copy=True)
+        Et_r = np.array(File['SDF/Electric_Field_Modes_Etm_real'][:], copy=True)
+        Ex_i = np.array(File['SDF/Electric_Field_Modes_Exm_imag'][:], copy=True)
+        Ex_r = np.array(File['SDF/Electric_Field_Modes_Exm_real'][:], copy=True)
+
+    Y, Z = np.meshgrid(y, z, indexing='ij')  # (Ny, Nz)
+    _, _, nm = Er_r.shape
+    indices = np.searchsorted(x_sim, x)
+    Nx = len(indices)
+    Ny, Nz = Y.shape
+
+    rgrid = np.hypot(Y, Z)            # (Ny, Nz)
+    thetag = np.arctan2(Z, Y)         # (Ny, Nz)
+
+    # Pre-allocate
+    if field == 'Ey' or field == 'Ez':
+        Er = np.zeros((Nx, Ny, Nz))
+        Ep = np.zeros_like(Er)
+    if field == 'Ex':
+        Ex = np.zeros((Nx, Ny, Nz))
+
+    # Helper: interpolate a (nx, nr) array onto rgrid (Ny, Nz) for all x
+    def interp_on_rgrid(arr_x_r):
+        out = np.empty((Nx, Ny, Nz))
+        for i, xi in enumerate(indices):
+            out[i] = np.interp(rgrid, r_sim, arr_x_r[xi], left=arr_x_r[xi,0], right=arr_x_r[xi,-1])
+        return out
+
+    # Sum over modes:  a_m(r) cos(mθ) + b_m(r) sin(mθ)
+    cos_mtheta = [np.cos(m*thetag) for m in range(nm)]
+    sin_mtheta = [np.sin(m*thetag) for m in range(nm)]
+
+    for m in range(nm):
+        # interpolate radial profiles for this mode onto (Ny,Nz) grid, for all x
+        Er_re = interp_on_rgrid(Er_r[:, :, m])
+        Er_im = interp_on_rgrid(Er_i[:, :, m])
+        Et_re = interp_on_rgrid(Et_r[:, :, m])
+        Et_im = interp_on_rgrid(Et_i[:, :, m])
+        Ex_re = interp_on_rgrid(Ex_r[:, :, m])
+        Ex_im = interp_on_rgrid(Ex_i[:, :, m])
+
+        # add this mode’s contribution
+        c = cos_mtheta[m][None, :, :]    # broadcast (1,Ny,Nz)
+        s = sin_mtheta[m][None, :, :]
+
+        if field == 'Ey' or field == 'Ez':
+            Er += Er_re*c + Er_im*s
+            Ep += Et_re*c + Et_im*s
+            
+        if field == 'Ex':
+            Ex += Ex_re*c + Ex_im*s
+
+    # Rotate cylindrical (Er, Eφ) -> Cartesian (Ey, Ez)
+    # Using Ey + i Ez = (Er + i Eφ) e^{iθ}  ⇒ the real/imag forms:
+    ct = np.cos(thetag)[None, :, :]
+    st = np.sin(thetag)[None, :, :]
+
+    if field == 'Ey':
+        Ey = Er*ct - Ep*st
+        if np.min(Ey.shape)==1:
+            Ey = Ey.squeeze()
+        else:
+            Ey = np.mean(Ey, axis=np.argmin(Ey.shape))
+        return Ey
+    elif field == 'Ez':
+        Ez = Er*st + Ep*ct
+        if np.min(Ez.shape)==1:
+            Ez = Ez.squeeze()
+        else:
+            Ez = np.mean(Ez, axis=np.argmin(Ez.shape))
+        return Ez
+    elif field == 'Ex':
+        if np.min(Ex.shape)==1:
+            Ex = Ex.squeeze()
+        else:
+            Ex = np.mean(Ex, axis=np.argmin(Ex.shape))
+        return Ex
+
+def AverageField(directory, fileprefix, file_num, sim, grid, field, n_avg=10, d_out=1):
+    import h5py
+    import numpy as np
+    avg_start = (file_num*(n_avg*d_out))-n_avg
+    avg_end = (file_num*(n_avg*d_out))+1
+    # print(f'Averaging from file {avg_start} to file {avg_end-1}')
+    Er_i = Er_r = Et_i = Et_r = Ex_i = Ex_r = None
+    for i in range(avg_start, avg_end):
+        with h5py.File(f"{directory}/{fileprefix}{i:04d}.h5", 'r') as File:
+            # Process the data as needed
+            if Er_i is None:
+                Er_i = np.array(File['SDF/Electric_Field_Modes_Erm_imag'][:], copy=True)
+                Er_r = np.array(File['SDF/Electric_Field_Modes_Erm_real'][:], copy=True)
+                Et_i = np.array(File['SDF/Electric_Field_Modes_Etm_imag'][:], copy=True)
+                Et_r = np.array(File['SDF/Electric_Field_Modes_Etm_real'][:], copy=True)
+                Ex_i = np.array(File['SDF/Electric_Field_Modes_Exm_imag'][:], copy=True)
+                Ex_r = np.array(File['SDF/Electric_Field_Modes_Exm_real'][:], copy=True)
+            else:
+                Er_i += File['SDF/Electric_Field_Modes_Erm_imag'][:]
+                Er_r += File['SDF/Electric_Field_Modes_Erm_real'][:]
+                Et_i += File['SDF/Electric_Field_Modes_Etm_imag'][:]
+                Et_r += File['SDF/Electric_Field_Modes_Etm_real'][:]
+                Ex_i += File['SDF/Electric_Field_Modes_Exm_imag'][:]
+                Ex_r += File['SDF/Electric_Field_Modes_Exm_real'][:]
+    E = reconstruct_2d(sim, grid, field=field, Er_i=Er_i/n_avg, Er_r=Er_r/n_avg, Et_i=Et_i/n_avg, Et_r=Et_r/n_avg, Ex_i=Ex_i/n_avg, Ex_r=Ex_r/n_avg)
+    return E
