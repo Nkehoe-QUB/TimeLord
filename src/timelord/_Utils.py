@@ -530,3 +530,140 @@ def Print_Error(futs, ex, i, err, tb):
                        f"{err}\n\n"
                        f"--- Remote traceback (child) ---\n{tb}"
                        )
+
+def get_available_memory():
+    import os
+    import subprocess
+    """
+    Return available memory in bytes.
+    Priority:
+      1) cgroup hard cap (memory.limit/memory.max minus current usage)
+      2) SLURM requested memory (--mem / --mem-per-cpu) minus current process RSS (best-effort)
+      3) System available RAM
+    """
+
+    def _is_unlimited(limit: int) -> bool:
+        # Treat extremely large limits as "no limit"
+        return limit >= (1 << 60)  # ~1 EiB
+
+    # --- 1) cgroups v1/v2 hard limits ---
+    try:
+        # v1
+        lim_v1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        use_v1 = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        if os.path.exists(lim_v1):
+            with open(lim_v1) as f:
+                limit = int(f.read().strip())
+            if not _is_unlimited(limit):
+                used = 0
+                if os.path.exists(use_v1):
+                    with open(use_v1) as f:
+                        used = int(f.read().strip())
+                return max(0, limit - used)
+        # v2
+        lim_v2 = "/sys/fs/cgroup/memory.max"
+        use_v2 = "/sys/fs/cgroup/memory.current"
+        if os.path.exists(lim_v2):
+            with open(lim_v2) as f:
+                limit_str = f.read().strip()
+            if limit_str != "max":
+                limit = int(limit_str)
+                if not _is_unlimited(limit):
+                    used = 0
+                    if os.path.exists(use_v2):
+                        with open(use_v2) as f:
+                            used = int(f.read().strip())
+                    return max(0, limit - used)
+            # If hard max is "max", try soft throttle memory.high if set
+            high_v2 = "/sys/fs/cgroup/memory.high"
+            if os.path.exists(high_v2):
+                with open(high_v2) as f:
+                    high_str = f.read().strip()
+                if high_str and high_str != "max":
+                    high = int(high_str)
+                    if not _is_unlimited(high) and os.path.exists(use_v2):
+                        with open(use_v2) as f:
+                            used = int(f.read().strip())
+                        return max(0, high - used)
+    except Exception:
+        pass
+
+    # Helper: current process RSS (best-effort)
+    def _rss_bytes():
+        try:
+            import psutil
+            return psutil.Process(os.getpid()).memory_info().rss
+        except Exception:
+            try:
+                # Linux fallback via /proc/self/statm
+                with open("/proc/self/statm") as f:
+                    pages = int(f.read().split()[1])
+                page = os.sysconf("SC_PAGE_SIZE")
+                return pages * page
+            except Exception:
+                return 0
+
+    # --- 2) SLURM requested memory (env or scontrol) ---
+    # a) Env vars first
+    req_bytes = None
+    try:
+        mem_per_node = os.environ.get("SLURM_MEM_PER_NODE")
+        mem_per_cpu  = os.environ.get("SLURM_MEM_PER_CPU")
+        if mem_per_node:
+            req_bytes = int(mem_per_node) * 1024 * 1024  # MB -> B
+        elif mem_per_cpu:
+            # Multiply by allocated CPUs if known
+            cpus = int(os.environ.get("SLURM_CPUS_ON_NODE")
+                       or os.environ.get("SLURM_CPUS_PER_TASK")
+                       or os.environ.get("SLURM_NTASKS") or "1")
+            req_bytes = int(mem_per_cpu) * 1024 * 1024 * max(1, cpus)
+    except Exception:
+        req_bytes = None
+
+    # b) If env not set, try `scontrol show job`
+    if req_bytes is None:
+        job_id = os.environ.get("SLURM_JOB_ID")
+        if job_id:
+            try:
+                out = subprocess.run(
+                    ["scontrol", "show", "job", job_id],
+                    capture_output=True, text=True, timeout=2
+                ).stdout
+                # Look for MinMemoryNode or MinMemoryCPU
+                # Examples: MinMemoryNode=6144M  or MinMemoryCPU=6000M
+                mmn = None
+                for token in out.replace("\n", " ").split():
+                    if token.startswith("MinMemoryNode=") or token.startswith("MinMemoryCPU="):
+                        val = token.split("=", 1)[1]
+                        # supports M, G
+                        if val.endswith(("M", "m")):
+                            mmn = int(val[:-1]) * 1024 * 1024
+                        elif val.endswith(("G", "g")):
+                            mmn = int(val[:-1]) * 1024 * 1024 * 1024
+                        else:
+                            # assume MB if bare
+                            mmn = int(val) * 1024 * 1024
+                        break
+                if mmn is not None:
+                    req_bytes = mmn
+            except Exception:
+                pass
+
+    if req_bytes is not None and req_bytes > 0:
+        # available ≈ requested - our current RSS (best-effort)
+        return max(0, req_bytes - _rss_bytes())
+
+    # --- 3) System available RAM ---
+    try:
+        import psutil
+        return psutil.virtual_memory().available
+    except Exception:
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024  # kB->B
+        except Exception:
+            pass
+
+    return None

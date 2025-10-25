@@ -11,7 +11,7 @@ plt.rcParams["legend.fontsize"] = 14
 import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error
+from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation, convert_one, pick_safe_workers, Iter_Plot, Print_Error, get_available_memory
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Movie=True, Test=False, DelData=True, Prefix=None):
@@ -40,10 +40,12 @@ class Process():
         self.Colours = {'electron': 'r', 'proton': 'b', 'carbon': 'k'}
         self.workers = pick_safe_workers()
         self.FilePrefix = False
+        AvailMem = get_available_memory()
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
         Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
+        Message += f"Available memory is \033[1;33m{AvailMem/1e9:.2f}\033[0m GB\n" if AvailMem is not None else "\033[1;31mCould not determine available memory\033[0m\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
 
         if len([i for i in glob.glob(f'{self.SimulationPath}/*.visit')]) > 1 and Prefix is None and f'{self.SimulationPath}/0000.h5' not in os.listdir(self.SimulationPath):
