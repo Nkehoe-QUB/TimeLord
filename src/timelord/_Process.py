@@ -66,6 +66,8 @@ class Process():
             else:
                 ConvAvgData = True
                 LenAvgData = LenAvgSDF if LenAvgHDF==0 else LenAvgSDF + LenAvgHDF -1 if LenAvgSDF != LenAvgHDF else LenAvgSDF
+        else:
+            ConvAvgData = False
         if Prefix:
             with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
                 text = f.readlines()
@@ -281,7 +283,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, n_avg=10, d_out=1, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, n_avg=10, d_out=1, DataOnly=False, MultiPros=False, Iter=None):
         if not MultiPros:
             if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
