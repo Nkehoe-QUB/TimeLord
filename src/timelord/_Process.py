@@ -11,10 +11,32 @@ plt.rcParams["legend.fontsize"] = 14
 import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import inspect
 from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation,convert_one, pick_safe_workers, Iter_Plot, Print_Error, get_available_memory, AverageField, reconstruct_2d
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
+        """Initialize TimeLord Process class.
+        Parameters: 
+        -----------
+        SimName : str, optional (default is current directory)
+            Path to the simulation folder.
+        Ped : float, optional
+            Pedestal time to add to t0 in seconds or picoseconds (if >1).
+        Log : bool, optional
+            If True, print log messages.
+        Geo : str, optional
+            Simulation geometry, either 'cart' for Cartesian or 'cyl' for Cylindrical.
+        Movie : bool, optional
+            If True, generate movies for diagnostics that support it.
+        Test : bool, optional
+            If True, run in test mode with additional print statements.
+        DelData : bool, optional
+            If True, delete original SDF files after conversion to HDF5.
+        Prefix : str, optional
+            Prefix for .visit file if multiple are present.
+        -----------
+        """
         ########### Constants ##################################
         self.c = 299792458. 
         self.me = 9.11e-31
@@ -186,6 +208,14 @@ class Process():
         if self.Log: print(Message)
 
     def DiagCheck(self, Diag):
+        """Check if a diagnostic exists in the simulation.
+        Parameters:
+        -----------
+        Diag : str
+            Name of the diagnostic to check.
+        -----------
+        Returns: bool
+        """
         if self.Geo == 'cart':
             File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
             try: File[f"SDF/{Diag}"][:]
@@ -199,6 +229,36 @@ class Process():
             return True
     
     def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None, n_avg=10, d_out=1):
+        """Get data from a specific diagnostic at a given timestep.
+        Parameters:
+        -----------
+        Diag : str
+            Name of the diagnostic.
+        Name : str
+            Name of the species or field.
+        AxisNames : list of str
+            List of axis names to retrieve.
+        t : int
+            Timestep index.
+        dx : int, optional
+            Downsampling factor in x direction (default is 1, no downsampling, 0 is downsampling of 4).
+        dy : int, optional
+            Downsampling factor in y direction (default is 1, no downsampling, 0 is downsampling of 4).
+        Averaged : bool, optional
+            If True, get averaged data (default is False).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        n_avg : int, optional
+            Number of timesteps to average over if Averaged is True (default is 10).
+        d_out : int, optional
+            Downsampling factor for output if Averaged is True (default is 1).
+        -----------
+        Returns:
+        Data : np.ndarray
+            Retrieved data array.
+        Axis : dict
+            Dictionary of axis arrays.
+        """
         if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
         if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
         Axis = {axis: [] for axis in AxisNames}
@@ -284,6 +344,46 @@ class Process():
         return Data, Axis
 
     def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, n_avg=10, d_out=1, DataOnly=False, MultiPros=False, Iter=None):
+        """Plot density or average energy density for specified species and/or electric field.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        EkBar : bool, optional
+            If True, plot average energy density instead of number density (default is False).
+        Field : str, optional
+            Name of the electric field component to plot (e.g., 'Ex', 'Ey', 'Ez').
+        FieldAvg : str, optional
+            Name of the averaged electric field component to plot (e.g., 'Ex', 'Ey', 'Ez').
+        FMax : float, optional
+            Maximum value for the color scale.
+        Colours : list of str, optional
+            List of colors for each species (e.g., ['r', 'b']).
+        CBMin : float, optional
+            Minimum value for the color bar.
+        CBMax : float, optional
+            Maximum value for the color bar.
+        dx : int, optional
+            Downsampling factor in x direction (default is 0, automatic downsampling).
+        dy : int, optional
+            Downsampling factor in y direction (default is 0, automatic downsampling).
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        n_avg : int, optional
+            Number of timesteps to average over if FieldAvg is used (default is 10).
+        d_out : int, optional
+            Downsampling factor for output if FieldAvg is used (default is 1).
+        DataOnly : bool, optional
+            If True, return data instead of plotting (default is False).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        dict
+            If DataOnly is True, returns a dictionary with data arrays and axes.
+        """
         if not MultiPros:
             if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
@@ -447,6 +547,34 @@ class Process():
             plt.close(fig)
         
     def SpectraPlot(self, Species=[], XMax=None, YMin=None, YMax=None, File=None, Z=None, Avereraged=True, DataOnly=False, MultiPros=False, Iter=None):
+        """Plot energy spectra for specified species.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        XMax : float, optional
+            Maximum value for the x-axis.
+        YMin : float, optional
+            Minimum value for the y-axis.
+        YMax : float, optional
+            Maximum value for the y-axis.
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        Avereraged : bool, optional
+            If True, apply moving average to the spectra (default is True).
+        DataOnly : bool, optional
+            If True, return data instead of plotting (default is False).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        dict or tuple
+            If DataOnly is True, returns a dictionary with data arrays and axes, or a tuple of arrays.
+        """
         if not MultiPros:
             if not Species:
                 raise ValueError("No species were provided")
@@ -537,6 +665,40 @@ class Process():
             plt.close(fig)
     
     def AnglePlot(self, Species=[], CBMin=None, CBMax=None, XMax=None, YMin=None, YMax=None, LasAngle=None, Integrate=None, File=None, Z=None, DataOnly=False, MultiPros=False, Iter=None):
+        """Plot angular distribution for specified species.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        CBMin : float, optional
+            Minimum value for the color bar.
+        CBMax : float, optional
+            Maximum value for the color bar.
+        XMax : float, optional
+            Maximum value for the x-axis (energy).
+        YMin : float, optional
+            Minimum value for the y-axis (angle in radians).
+        YMax : float, optional
+            Maximum value for the y-axis (angle in radians).
+        LasAngle : float, optional
+            Laser angle for reference line (in degrees).
+        Integrate : float, optional
+            Energy range to integrate over (in MeV).
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        DataOnly : bool, optional
+            If True, return data instead of plotting (default is False).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        dict or tuple
+            If DataOnly is True, returns a dictionary with data arrays and axes, or a tuple of arrays.
+        """
         if not MultiPros:
             if not Species:
                 raise ValueError("No species were provided")
@@ -648,6 +810,38 @@ class Process():
             plt.close(fig)
 
     def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, Z=1, Averaged=True, DataOnly=False, MultiPros=False, Iter=None):
+        """Plot energy distribution for specified species within given angle ranges.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        AngleOffset : float, optional
+            Central angle offset for the angular range (in degrees, default is 0).
+        Angles : list of float
+            List of angle ranges to integrate over (in degrees).
+        YMin : float, optional
+            Minimum value for the y-axis.
+        YMax : float, optional
+            Maximum value for the y-axis.
+        XMax : float, optional
+            Maximum value for the x-axis (energy).
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        Averaged : bool, optional
+            If True, apply moving average to the energy distribution (default is True).
+        DataOnly : bool, optional
+            If True, return data instead of plotting (default is False).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        dict or tuple
+            If DataOnly is True, returns a dictionary with data arrays and axes, or a tuple of arrays.
+        """
         if not MultiPros:
             if not Species:
                 raise ValueError("No species were provided")
@@ -731,7 +925,7 @@ class Process():
                         A_energies = MovingAverage(A_energies, 3)
                     if YMax is None :
                         ymax= np.nanmax(A_energies) if np.nanmax(A_energies) > ymax else ymax
-                    ax.plot(axis['ekin'], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
+                    ax.plot(axis['ekin'], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None, linestyle=['-','--','-.'][Angles.index(j)])
             xmax = np.nanmax(axis['ekin']) if XMax is None else XMax
             ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, ymax if ymax > 0 else 1e15), yscale='log',
                     xlabel='Energy [MeV/u]', xlim=(0, xmax if not np.isinf(xmax) and xmax > 0 else 0.1),
@@ -743,6 +937,37 @@ class Process():
             plt.close(fig)
 
     def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
+        """Plot lineouts of specified species densities and electric fields.
+        Parameters:
+        -----------
+        Species : list of str, optional
+            List of species to plot (e.g., ['electron', 'proton']).
+        E_las : str or bool, optional
+            Electric field component to plot (e.g., 'E1'). If False, no laser field is plotted.
+        E_avg : str or bool, optional
+            Averaged electric field component to plot (e.g., 'E1'). If False, no averaged field is plotted.
+        FSpot : float, optional
+            Full width of the spot to average over in microns (default is 0, no averaging).
+        FMax : float, optional
+            Maximum value for the electric field y-axis.
+        YMin : float, optional
+            Minimum value for the density y-axis.
+        YMax : float, optional
+            Maximum value for the density y-axis.
+        XMin : float, optional
+            Minimum value for the x-axis.
+        XMax : float, optional
+            Maximum value for the x-axis.
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        None
+        """
         if not MultiPros:
             if Species is None  and (E_las is False and E_avg is False):
                 raise ValueError("No species or field were provided")
@@ -846,6 +1071,33 @@ class Process():
             plt.close(fig)
 
     def EnergyTimePlot(self, Species=[], XMin=None, XMax=None, YMin=None, YMax=None, YMin2=None, YMax2=None, Average=True, File=None, Z=None):
+        """Plot maximum energy vs time for specified species.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        XMin : float, optional
+            Minimum value for the x-axis (time).
+        XMax : float, optional
+            Maximum value for the x-axis (time).
+        YMin : float, optional
+            Minimum value for the y-axis (max energy).
+        YMax : float, optional
+            Maximum value for the y-axis (max energy).
+        YMin2 : float, optional
+            Minimum value for the y-axis of the derivative plot (dE/dt).
+        YMax2 : float, optional
+            Maximum value for the y-axis of the derivative plot (dE/dt).
+        Average : bool, optional
+            If True, apply moving average to the max energy (default is True).
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        -----------
+        Returns:
+        None
+        """
         if not Species:
             raise ValueError("No species were provided")
         if not isinstance(Species, list):
@@ -891,6 +1143,37 @@ class Process():
         print(f"\nEnergy time plots saved in {self.pros_path}")
 
     def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, MultiPros=False, Iter=None):
+        """Plot phase space for specified species.
+        Parameters:
+        -----------
+        Species : list of str
+            List of species to plot (e.g., ['electron', 'proton']).
+        Phase : str
+            Phase space to plot (e.g., 'x-px', 'y-py', 'x-energy', etc.).
+        CBMin : float, optional
+            Minimum value for the color bar.
+        CBMax : float, optional
+            Maximum value for the color bar.
+        YMin : float, optional
+            Minimum value for the y-axis.
+        YMax : float, optional
+            Maximum value for the y-axis.
+        XMin : float, optional
+            Minimum value for the x-axis.
+        XMax : float, optional
+            Maximum value for the x-axis.
+        File : str, optional
+            Filename to save the plots (default is None, auto-generated).
+        Z : int, optional
+            Number of nucleons for energy normalization (required for 'ekin' axis).
+        MultiPros : bool, optional
+            If True, use multiprocessing for plotting (default is False).
+        Iter : int, optional
+            Specific iteration to plot (default is None, plots all iterations).
+        -----------
+        Returns:
+        None
+        """
         if not MultiPros:
             if not Species:
                 raise ValueError("No species were provided")
@@ -1093,3 +1376,20 @@ class Process():
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
+
+    def Help(self):
+        print("Available methods:\n")
+        # Inspect bound methods on this instance
+        for name, member in inspect.getmembers(self, predicate=inspect.ismethod):
+            # Skip dunders and Help itself
+            if name.startswith("_") or name == "Help":
+                continue
+
+            sig = inspect.signature(member)
+            doc = inspect.getdoc(member)
+            first_line = doc.splitlines()[0] if doc else ""
+
+            print(f"{name}{sig}")
+            if first_line:
+                print(f"    {first_line}")
+            print()
