@@ -12,7 +12,7 @@ import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import inspect
-from ._Utils import PrintPercentage, MakeMovie, MovingAverage, round_up_scientific_notation,convert_one, pick_safe_workers, Iter_Plot, Print_Error, get_available_memory, AverageField, reconstruct_2d
+from ._Utils import *
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
@@ -343,7 +343,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, n_avg=10, d_out=1, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, n_avg=10, d_out=1, DataOnly=False, MultiPros=False, Iter=None):
         """Plot density or average energy density for specified species and/or electric field.
         Parameters:
         -----------
@@ -359,6 +359,14 @@ class Process():
             Maximum value for the color scale.
         Colours : list of str, optional
             List of colors for each species (e.g., ['r', 'b']).
+        XMin : float, optional
+            Minimum value for the x-axis.
+        XMax : float, optional
+            Maximum value for the x-axis.
+        YMin : float, optional
+            Minimum value for the y-axis.
+        YMax : float, optional
+            Maximum value for the y-axis.
         CBMin : float, optional
             Minimum value for the color bar.
         CBMax : float, optional
@@ -410,7 +418,7 @@ class Process():
                     Colours = None
                 else: Colours = [Colours]
             if self.Log:
-                if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities and/or {Field if Field else FieldAvg} field data only")
+                if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities {f'and/or {Field} field data' if Field else f'and/or {FieldAvg} field data' if FieldAvg else 'only'}")
                 else:
                     if Species: print(f"\nPlotting {[f'{s}' for s in Species]} {'average energy 'if EkBar else ''}densities{f' and {Field if Field else FieldAvg} field' if Field or FieldAvg else ''}")
                     else: print(f"\nPlotting {Field if Field else FieldAvg} field")
@@ -432,9 +440,9 @@ class Process():
                             to_return[FieldAvg]['axis'][k].append(v)
                     if Species:
                         for type in Species:
-                            den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, i, dx=dx, dy=dy)
-                            to_return[type]['data'].append(den_to_plot[type])
-                            for k, v in axis[type].items():                 # axis[type] is a dict
+                            den_to_plot, axis = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, i, dx=dx, dy=dy)
+                            to_return[type]['data'].append(den_to_plot)
+                            for k, v in axis.items():                 # axis[type] is a dict
                                 to_return[type]['axis'][k].append(v)
                     if self.Log:
                         PrintPercentage(i, self.LenSim - 1)
@@ -454,7 +462,7 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -521,7 +529,8 @@ class Process():
                     cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=transparent_cmap, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if FMax is None else FMax), zorder=len(Species)+1)
                     cbar1 = fig.colorbar(cax1, aspect=50)
                     cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
-                ax.set_ylabel(r'y [$\mu$m]')
+                ax.set(xlim=(XMin if XMin is not None else None, XMax if XMax is not None else None),
+                       ylim=(YMin if YMin is not None else None, YMax if YMax is not None else None), ylabel=r'y [$\mu$m]')
             elif self.Dim == 1:
                 if Field or FieldAvg:
                     E = Field if Field else FieldAvg
@@ -536,8 +545,8 @@ class Process():
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
-                    ax.set(ylim=(1e-3 if CBMin is None else CBMin, 1e3 if CBMax is None else CBMax), ylabel=f'N {"[$N_c$]" if not EkBar else "[MeV]"}', yscale='log',
-                           xlim=(np.min(axis[type]['x']), np.max(axis[type]['x'])))
+                    ax.set(ylim=(1e-3 if YMin is None else YMin, 1e3 if YMax is None else YMax), ylabel=f'N {"[$N_c$]" if not EkBar else "[MeV]"}', yscale='log',
+                           xlim=(np.min(axis[type]['x']) if XMin is None else XMin, np.max(axis[type]['x']) if XMax is None else XMax))
             if Species: ax.set_title(f"{axis[type]['Time']}fs")
             else: ax.set_title(f"{E_axis['Time']}fs")
             ax.grid(True)
@@ -1376,6 +1385,45 @@ class Process():
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
+
+    def CDSurfacePlot(self, FSpot=0.5, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None):
+        if FSpot < 1:
+            FSpot = FSpot/self.micro
+        den_to_plot, axis = self.DensityPlot('rel electron', DataOnly=True)['rel electron']
+        start = np.argwhere(axis['Time']>-0.8*self.Tau*1e15)[0][0]
+        CD_Surf, DenTime = getCDSurf(axis['x'], axis['y'], den_to_plot, FSpot, self.TimeSteps.size, start)
+        cp=(self.Tau*1e15)/(2*np.sqrt(2*np.log(2)))
+        test=Gau(axis["Time"], 1.0, 0.0, cp)
+        Trans, TTrans = GoTrans(CD_Surf, self.Tau, axis["Time"])
+        SaveFile=File if File is not None else "rel_cd_surface"
+
+        fig =self.plt.Figure(figsize=(8,5),num=7,clear=True, constrained_layout=True)
+        gs = self.gs.GridSpec(1,2,width_ratios=[1,4], figure=fig)
+        ax1 = self.plt.subplot(gs[0])
+        ax2 = self.plt.subplot(gs[1], sharey=ax1)
+        print(f"\nPlotting relativistic critical density surface")
+        den = self.np.swapaxes(DenTime, 0, 1)
+        cax=ax2.pcolormesh(axis["x"],axis["Time"],den, cmap=self.cmaps.batlowK, norm=self.cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax))
+        ax2.plot(CD_Surf,axis["Time"], 'k--', label=r'$\gamma$ N$_c$')
+        if Trans:
+            ax2.arrow(-1. if XMin is None else XMin, TTrans, 0.5 if XMin is None else abs(XMin)/2, 0, head_width=4, head_length=0.1 if XMin is None else abs(XMin)/10, ec='r', ls='--', label=f"Trans @ {TTrans}fs")
+        ax2.legend()
+        ax1.plot(test,axis["Time"],'r-')
+        ax1.spines['right'].set_visible(False)
+        ax1.spines['top'].set_visible(False)
+        ax1.set_xticks([])
+        ax1.tick_params(axis='both', which='both', bottom=False)
+        cbar=fig.colorbar(cax)
+        cbar.set_label(r'$\gamma$N$_e$ [$N_c$]')
+        ax2.set_xlabel(r'x [$\mu$m]')
+        ax2.set_ylabel(r't [$fs$]')
+        ax2.set_xlim(-1. if XMin is None else XMin, 1. if XMax is None else XMax)
+        ax1.set_ylim(top=axis["Time"][-1] if YMax is None else YMax)
+        self.plt.subplots_adjust(wspace=0.25)
+        ax2.set_title('Electron Density and\nRelativistic Critical Density')
+        self.plt.savefig(self.pros_path + '/' + SaveFile + '.png',dpi=200)
+        print(f"\nCritical density surface saved in {self.pros_path}")
+
 
     def Help(self):
         print("Available methods:\n")
