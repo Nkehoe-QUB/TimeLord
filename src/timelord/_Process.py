@@ -720,22 +720,22 @@ class Process():
             ymax = 0 if YMax is None else YMax
             for j in Angles:
                 if j == 0:
-                    A0_arg = np.argwhere(axis['theta'][Iter]-np.radians(AngleOffset)==abs(axis['theta'][Iter]-np.radians(AngleOffset)).min())[0]
+                    A0_arg = np.argwhere(axis['theta']-np.radians(AngleOffset)==abs(axis['theta']-np.radians(AngleOffset)).min())[0]
                     if Averaged:
-                        A0_energies = MovingAverage(np.reshape(spect_to_plot[Iter][A0_arg,:], axis['ekin'][Iter].shape), 3)
-                    ax.plot(axis['ekin'][Iter], A0_energies, label=r'$\theta$ $\equal$ 0$\degree$', color=self.Colours[type] if type in self.Colours.keys() else None)
+                        A0_energies = MovingAverage(np.reshape(spect_to_plot[A0_arg,:], axis['ekin'].shape), 3)
+                    ax.plot(axis['ekin'], A0_energies, label=r'$\theta$ $\equal$ 0$\degree$', color=self.Colours[type] if type in self.Colours.keys() else None)
                 else:
-                    A_arg = np.argwhere(abs(axis['theta'][Iter]-np.radians(AngleOffset))<=np.radians(j))
-                    A_energies = np.reshape(np.sum(spect_to_plot[Iter][A_arg,:],axis=0),spect_to_plot[Iter].shape[1])
+                    A_arg = np.argwhere(abs(axis['theta']-np.radians(AngleOffset))<=np.radians(j))
+                    A_energies = np.reshape(np.sum(spect_to_plot[A_arg,:],axis=0),spect_to_plot.shape[1])
                     if Averaged:
                         A_energies = MovingAverage(A_energies, 3)
                     if YMax is None :
                         ymax= np.nanmax(A_energies) if np.nanmax(A_energies) > ymax else ymax
-                    ax.plot(axis['ekin'][Iter], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
-            xmax = np.nanmax(axis['ekin'][Iter]) if XMax is None else XMax
+                    ax.plot(axis['ekin'], A_energies, label=f"$\\theta$ $\\equal$ $\\pm${j}$\\degree$" if AngleOffset==0 else f"$\\theta$ $\\equal$ {AngleOffset} $\\pm${j}$\\degree$", color=self.Colours[type] if type in self.Colours.keys() else None)
+            xmax = np.nanmax(axis['ekin']) if XMax is None else XMax
             ax.set(ylabel='dnde [arb. units]', ylim=(1e10 if YMin is None else YMin, ymax if ymax > 0 else 1e15), yscale='log',
                     xlabel='Energy [MeV/u]', xlim=(0, xmax if not np.isinf(xmax) and xmax > 0 else 0.1),
-                    title=f"{axis['Time'][Iter]}fs")
+                    title=f"{axis['Time']}fs")
             ax.legend()
             ax.grid()
             fig.tight_layout()
