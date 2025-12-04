@@ -13,6 +13,7 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import inspect
 from ._Utils import *
+import sdf_helper as sh
 
 class Process():
     def __init__(self, SimName=".", Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
@@ -65,6 +66,14 @@ class Process():
         self.Geo = Geo
         if self.Geo not in ['cart', 'cyl']:
             raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
+        try:
+            with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
+                try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+                except: self.Dim = 2
+        except:
+            with sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf')) as file:
+                try: self.Dim = len(file.Electric_Field_Ey.dims)
+                except: self.Dim = 2
         AvailMem = get_available_memory()
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
@@ -74,22 +83,8 @@ class Process():
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
         visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
 
-        if len(visit_files) > 1 and Prefix is None and 'average.visit' not in visit_files: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
+        if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
             raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
-        if 'average.visit' in visit_files:
-            with open(os.path.join(self.SimulationPath, f'average.visit'), 'r') as f:
-                text = f.readlines()
-                self.AvgFilePrefix = text[0].replace('\n','').split('.')[0][:-4]
-                # AvgSDFFiles = [line.rstrip('\n') for line in f]
-            LenAvgSDF = len([int(i.split('/')[-1].split('.')[0].split(self.AvgFilePrefix)[-1]) for i in glob.glob(f'{self.SimulationPath}/{self.AvgFilePrefix}*.sdf')])
-            LenAvgHDF = len([int(i.split('/')[-1].split('.')[0].split(self.AvgFilePrefix)[-1]) for i in glob.glob(f'{self.SimulationPath}/{self.AvgFilePrefix}*.h5')])
-            if LenAvgSDF == 0:
-                ConvAvgData = False
-            else:
-                ConvAvgData = True
-                LenAvgData = LenAvgSDF if LenAvgHDF==0 else LenAvgSDF + LenAvgHDF -1 if LenAvgSDF != LenAvgHDF else LenAvgSDF
-        else:
-            ConvAvgData = False
         if Prefix:
             with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
                 text = f.readlines()
@@ -98,12 +93,10 @@ class Process():
         LenSDF = len([
             int(os.path.splitext(os.path.basename(i))[0])
             for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
-            if not os.path.basename(i).startswith("avg")
         ])
         LenHDF = len([
             int(os.path.splitext(os.path.basename(i))[0])
             for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
-            if not os.path.basename(i).startswith("avg")
         ])
         if LenSDF == 0:
             if LenHDF == 0:
@@ -111,18 +104,18 @@ class Process():
             ConvData = False
             self.LenSim = LenHDF
             Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
-        else: 
-            ConvData = True
+        else:
+            if self.Dim <= 2:
+                ConvData = True
+            else:
+                ConvData = False
+                Message += f"\n\033[1;33m3D Simulations are not converted to HDF5 format. Skipping conversion.\033[0m\n"
             self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF -1 if LenSDF != LenHDF else LenSDF
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
 
             tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
             total_tasks = self.LenSim
-            if ConvAvgData:
-                avg_tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.AvgFilePrefix) for i in range(LenAvgData)]
-                tasks.extend(avg_tasks)
-                total_tasks += LenAvgData
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -141,7 +134,7 @@ class Process():
             Message = "\n\n" + Message
 
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
-        Message += f"Simulation geometry set to \033[1;33m{'Cylindrical' if self.Geo == 'cyl' else 'Cartesian'}\033[0m\n"
+        Message += f"Simulation geometry set to \033[1;33m{'Cylindrical' if self.Geo == 'cyl' else 'Cartesian'}\033[0m with {self.Dim} dimensions\n"
         file_path = f'{self.SimulationPath}/input.deck'
         with open(file_path, 'r') as file:
             l_found=False
@@ -186,9 +179,6 @@ class Process():
                 self.Tau = 0
         omega_las = 2.*np.pi*self.c / lambda_las if l_found else 1
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
-        with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
-            try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
-            except: self.Dim = 2
         self.space_axis = self.space_axis[:self.Dim]
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*np.sqrt(np.log(2)))))/self.femto
         if Ped is not None: 
@@ -228,7 +218,7 @@ class Process():
             print("Diagnostic check for cylindrical geometry not yet implemented")
             return True
     
-    def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None, n_avg=10, d_out=1):
+    def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None):
         """Get data from a specific diagnostic at a given timestep.
         Parameters:
         -----------
@@ -271,6 +261,40 @@ class Process():
             attr += "_averaged"
 
         if self.Test: print(f"Processing file {t:04d}.sdf")
+        if self.Dim == 3 and Diag == "Electric_Field":
+            File = sh.getdata(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.sdf"), verbose=False)
+            Axis['x'] = File.Grid_Grid_mid.data[0]/ self.micro
+            
+            Axis['y'] = File.Grid_Grid_mid.data[1]/ self.micro
+            
+            Axis['Time'] = round(float(File.Header['time']) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
+            if Averaged and t == 0:
+                Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
+                print("Skipped averaging for the first file")
+            else:
+                Den = File.__dict__[attr].data
+                Den = np.reshape(np.mean(Den[:, :, np.where(abs(Axis['y'])<0.5)[0]], axis=2), (Axis['x'].shape[0], Axis['y'].shape[0]))
+            if dx != 1:
+                if dx == 0:
+                    dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
+                elif np.diff(Axis['x'][np.s_[::dx]])[0] > 100e-3:
+                    print(f"Warning: dx = {dx} is too large. Setting dx = 4")
+                    dx = 4
+                Axis["x"] = Axis["x"][np.s_[::dx]]
+            if dy != 1:
+                if dy == 0:
+                    dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
+                elif np.diff(Axis['y'][np.s_[::dy]])[0] > 100e-3:
+                    print(f"Warning: dy = {dy} is too large. Setting dy = 4")
+                    dy = 4
+                Axis["y"] = Axis["y"][np.s_[::dy]]
+            if dx != 1:
+                Den = Den[np.s_[::dx, ::dy]]
+            Data = Den
+            return Data, Axis
+        elif self.Dim == 3:
+            raise ValueError("Only Electric_Field diagnostic is supported for 3D simulations")
+        
         File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
         Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
 
@@ -307,21 +331,13 @@ class Process():
             Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
             print("Skipped averaging for the first file")
         else:
-            if self.Geo == 'cyl' and Diag == "Electric_Field":
-                sim_axis = [File["SDF/Grid_Grid_mid/axis0"][:]/self.micro, File["SDF/Grid_Grid_mid/axis1"][:]/self.micro]
-                args = np.where(abs(Axis['y'])<0.5)[0]
-                if Averaged:
-                    Den = AverageField(self.SimulationPath, self.FilePrefix, t, sim_axis, [Axis['x'], Axis['y'], Axis['y'][args]], Name, n_avg=n_avg, d_out=d_out)
-                else:
-                    Den = reconstruct_2d(sim_axis, [Axis['x'], Axis['y'], Axis['y'][args]], field=attr, File=File)
-            else:
-                Den = File[f"SDF/{attr}"][:]
-                if dx != 1:
-                    Den = Den[np.s_[::dx, ::dy]]
-                if rel_elec:
-                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
-                    Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
-                    Den = Den / Gamma
+            Den = File[f"SDF/{attr}"][:]
+            if dx != 1:
+                Den = Den[np.s_[::dx, ::dy]]
+            if rel_elec:
+                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
+                Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                Den = Den / Gamma
             Data = Den
 
         if Diag == "Derived_Number_Density":
@@ -343,7 +359,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, n_avg=10, d_out=1, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
         """Plot density or average energy density for specified species and/or electric field.
         Parameters:
         -----------
@@ -422,34 +438,6 @@ class Process():
                 else:
                     if Species: print(f"\nPlotting {[f'{s}' for s in Species]} {'average energy 'if EkBar else ''}densities{f' and {Field if Field else FieldAvg} field' if Field or FieldAvg else ''}")
                     else: print(f"\nPlotting {Field if Field else FieldAvg} field")
-            if DataOnly:
-                to_include = Species if Species else []
-                if Field: to_include.append(Field)
-                if FieldAvg: to_include.append(FieldAvg)
-                to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
-                for i in range(self.LenSim):
-                    if Field:
-                        E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, i, dx=dx, dy=dy)
-                        to_return[Field]['data'].append(E_data)
-                        for k, v in E_axis.items():
-                            to_return[Field]['axis'][k].append(v)
-                    elif FieldAvg:
-                        E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, i, Averaged=True, dx=dx, dy=dy, n_avg=n_avg, d_out=d_out)
-                        to_return[FieldAvg]['data'].append(E_data)
-                        for k, v in E_axis.items():
-                            to_return[FieldAvg]['axis'][k].append(v)
-                    if Species:
-                        for type in Species:
-                            den_to_plot, axis = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, i, dx=dx, dy=dy)
-                            to_return[type]['data'].append(den_to_plot)
-                            for k, v in axis.items():                 # axis[type] is a dict
-                                to_return[type]['axis'][k].append(v)
-                    if self.Log:
-                        PrintPercentage(i, self.LenSim - 1)
-                for type in to_include:
-                    to_return[type]['data'] = np.array(to_return[type]['data'])
-                    for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
-                return to_return
             if File is None:
                 SaveFile = "density" if not EkBar else "energy_density"
                 if Field:
@@ -462,17 +450,32 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
+            if DataOnly:
+                to_include = Species if Species else []
+                if Field: to_include.append(Field)
+                if FieldAvg: to_include.append(FieldAvg)
+                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in to_include}
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
                 try:
                     for fut in as_completed(futs):
-                        i, err, tb = fut.result()
+                        i, data, err, tb = fut.result()
                         if err:
                             Print_Error(futs, ex, i, err, tb)
                         else:
+                            if DataOnly:
+                                for type in to_include:
+                                    to_return[type]['data'][i] = data[type]['data']
+                                    for k, v in data[type]['axis'].items():
+                                        if i == 0:
+                                            if k == 'Time':
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim))
+                                            else:
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim, v.shape[0]))
+                                        to_return[type]['axis'][k][i] = v
                             done += 1
                             # keep your existing percentage display
                             idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
@@ -482,20 +485,45 @@ class Process():
                 finally:
                     # make sure we don't block on shutdown; it's idempotent
                     ex.shutdown(wait=False, cancel_futures=True)
-
+            if DataOnly:
+                print("\nReturning Data")
+                return to_return
             print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                 print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
+            if DataOnly:
+                to_include = Species if Species else []
+                if Field: to_include.append(Field)
+                if FieldAvg: to_include.append(FieldAvg)
+                to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
+                if Field:
+                    E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    to_return[Field]['data'] = np.array(E_data)
+                    for k, v in E_axis.items():
+                        to_return[Field]['axis'][k] = np.array(v)
+                elif FieldAvg:
+                    E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    to_return[FieldAvg]['data'] = np.array(E_data)
+                    for k, v in E_axis.items():
+                        to_return[FieldAvg]['axis'][k] = np.array(v)
+                if Species:
+                    for type in Species:
+                        den_to_plot, axis = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
+                        to_return[type]['data'] = np.array(den_to_plot)
+                        for k, v in axis.items():                 # axis[type] is a dict
+                            to_return[type]['axis'][k] = np.array(v)
+                return to_return
+
             fig, ax = plt.subplots(clear=True, figsize=(8,6))
             den_to_plot={}
             axis={}
             if Field:
                 E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
             elif FieldAvg:
-                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy, n_avg=n_avg, d_out=d_out)
+                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
@@ -591,35 +619,6 @@ class Process():
                 Species = [Species]
             for type in Species:
                 self.DiagCheck(f"dist_fn_spectra_{type}")
-            if DataOnly:
-                if len(Species) == 1:
-                    to_return = {'data': [], 'axis': defaultdict(list)}
-                else:
-                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
-                spect_to_plot={}
-                axis={}
-                for i in range(self.LenSim):
-                    for type in Species:
-                        spect_to_plot[type], axis[type] = self.GetData("dist_fn_spectra", type, ['ekin'], i, Z=Z)
-                    if Avereraged:
-                        spect_to_plot[type] = MovingAverage(spect_to_plot[type], 3)
-                    if len(Species) == 1:
-                        to_return['data'].append(spect_to_plot[Species[0]])
-                        for k, v in axis[Species[0]].items():
-                            to_return['axis'][k].append(v)
-                    else:
-                        to_return[type]['data'].append(spect_to_plot[type])
-                        for k, v in axis[type].items():                 # axis[type] is a dict
-                            to_return[type]['axis'][k].append(v)
-                if len(Species) == 1:
-                    to_return['data'] = np.array(to_return['data'])
-                    for axis in to_return['axis'].keys(): to_return['axis'][axis] = np.array(to_return['axis'][axis])
-                    return to_return['data'], to_return['axis']
-                else:
-                    for type in Species:
-                        to_return[type]['data'] = np.array(to_return[type]['data'])
-                        for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
-                    return to_return
             if File is None:
                 SaveFile = "energies"
                 if len(Species) == 1:
@@ -627,17 +626,30 @@ class Process():
                 else:
                     SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'SpectraPlot', Species, XMax, YMin, YMax, SaveFile, Z, Avereraged) for i in range(self.LenSim)]
+            tasks = [(i, self, 'SpectraPlot', Species, XMax, YMin, YMax, SaveFile, Z, Avereraged, DataOnly) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
+            if DataOnly:
+                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in Species}
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
                 try:
                     for fut in as_completed(futs):
-                        i, err, tb = fut.result()
+                        i, data, err, tb = fut.result()
                         if err:
                             Print_Error(futs, ex, i, err, tb)
                         else:
+                            if DataOnly:
+                                for type in Species:
+                                    to_return[type]['data'][i] = data[type]['data']
+                                    tmp = data[type]['axis']
+                                    for k, v in tmp.items():                 # axis[type] is a dict
+                                        if i == 0:
+                                            if k == 'Time':
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim))
+                                            else:
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim, v.shape[0]))
+                                        to_return[type]['axis'][k][i] = v
                             done += 1
                             # keep your existing percentage display
                             idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
@@ -647,13 +659,26 @@ class Process():
                 finally:
                     # make sure we don't block on shutdown; it's idempotent
                     ex.shutdown(wait=False, cancel_futures=True)
-
+            if DataOnly:
+                print("\nReturning data only")
+                return to_return
             print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                 print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
+            if DataOnly:
+                to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                for type in Species:
+                    spect_to_plot, axis = self.GetData("dist_fn_spectra", type, ['ekin'], Iter, Z=Z)
+                    if Avereraged:
+                        spect_to_plot = MovingAverage(spect_to_plot, 3)
+                    to_return[type]['data'] = np.array(spect_to_plot)
+                    for k, v in axis.items():                 # axis[type] is a dict
+                        to_return[type]['axis'][k] = np.array(v)
+                return to_return
+
             fig, ax = plt.subplots(clear=True, figsize=(8,6))
             spect_to_plot={}
             axis={}
@@ -672,6 +697,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
+            return Iter
     
     def AnglePlot(self, Species=[], CBMin=None, CBMax=None, XMax=None, YMin=None, YMax=None, LasAngle=None, Integrate=None, File=None, Z=None, DataOnly=False, MultiPros=False, Iter=None):
         """Plot angular distribution for specified species.
@@ -735,38 +761,14 @@ class Process():
                     if YMin > 0:
                         YMin = -YMin
                     YMax = -YMin
-
             if DataOnly:
-                if len(Species) == 1:
-                    to_return = {'data': [], 'axis': defaultdict(list)}
-                else:
-                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
-                for i in range(self.LenSim):
-                    for type in Species:
-                        angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], i, Z=Z)
-                    if len(Species) == 1:
-                        to_return['data'].append(angle_to_plot)
-                        for k, v in axis.items():
-                            to_return['axis'][k].append(v)
-                    else:
-                        to_return[type]['data'].append(angle_to_plot)
-                        for k, v in axis.items():                 # axis[type] is a dict
-                            to_return[type]['axis'][k].append(v)
-                if len(Species) == 1:
-                    to_return['data'] = np.array(to_return['data'])
-                    for axis in to_return['axis'].keys(): to_return['axis'][axis] = np.array(to_return['axis'][axis])
-                    return to_return['data'], to_return['axis']
-                else:
-                    for type in Species:
-                        to_return[type]['data'] = np.array(to_return[type]['data'])
-                        for axis in to_return[type]['axis'].keys(): to_return[type]['axis'][axis] = np.array(to_return[type]['axis'][axis])
-                    return to_return
+                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in Species}
             for type in Species:
                 if File is None:
                     SaveFile = f"{type}_angles"
                 else: SaveFile = File
                 tmp_max = XMax[Species.index(type)] if XMax is not None else None
-                tasks = [(i, self, 'AnglePlot', type, CBMin, CBMax, tmp_max, YMin, YMax, LasAngle, Integrate, SaveFile, Z) for i in range(self.LenSim)]
+                tasks = [(i, self, 'AnglePlot', type, CBMin, CBMax, tmp_max, YMin, YMax, LasAngle, Integrate, SaveFile, Z, DataOnly) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 if self.Log: print(f"\nPlotting {type} angles")
@@ -774,11 +776,21 @@ class Process():
                     futs = [ex.submit(Iter_Plot, t) for t in tasks]
                     try:
                         for fut in as_completed(futs):
-                            i, err, tb = fut.result()
+                            i, data, err, tb = fut.result()
                             if err:
                                 Print_Error(futs, ex, i, err, tb)
                             else:
                                 done += 1
+                                if DataOnly:
+                                    to_return[type]['data'][i] = data['data']
+                                    tmp = data['axis']
+                                    for k, v in tmp.items():                 # axis[type] is a dict
+                                        if i == 0:
+                                            if k == 'Time':
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim))
+                                            else:
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim, v.shape[0]))
+                                        to_return[type]['axis'][k][i] = v
                                 # keep your existing percentage display
                                 idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
                                 if idx_equiv != last_idx:
@@ -787,7 +799,9 @@ class Process():
                     finally:
                         # make sure we don't block on shutdown; it's idempotent
                         ex.shutdown(wait=False, cancel_futures=True)
-
+                if DataOnly:
+                    print("\nReturning data only")
+                    return to_return
                 print(f"\nDensities saved in {self.raw_path}")
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
@@ -795,6 +809,9 @@ class Process():
 
         elif MultiPros:
             type = Species
+            if DataOnly:
+                angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
+                return angle_to_plot, axis
             fig, ax = plt.subplots(clear=True, subplot_kw={'projection': 'polar'}, figsize=(8,6))
             angle_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
             try: cax = ax.pcolormesh(axis['theta'],axis['ekin'], angle_to_plot.T, cmap=cmaps.batlowK, norm=cm.LogNorm(vmin=1e11 if CBMin is None else CBMin, vmax=1e16 if CBMax is None else CBMax))
@@ -864,33 +881,23 @@ class Process():
             if DataOnly:
                 if len(Angles) > 1:
                     raise ValueError("DataOnly can only be used with a single angle")
-                if len(Species) == 1:
-                    to_return = {'data': [], 'axis': defaultdict(list)}
-                else:
-                    to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
+                to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
                 spect_to_plot = {}
                 axis = {}
                 for type in Species:
                     tmp = self.AnglePlot(type, DataOnly=True, Z=Z)
                     spect_to_plot[type], axis[type] = tmp[0], tmp[1]
-                
-                if len(Species) == 1:
-                    A_arg = np.argwhere(abs(axis[Species[0]]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
-                    to_return['data'] = np.reshape(np.sum(spect_to_plot[Species[0]][:,A_arg,:],axis=1), (spect_to_plot[Species[0]].shape[0], spect_to_plot[Species[0]].shape[-1]))
-                    to_return['axis'] = axis[Species[0]]
-                    return to_return['data'], to_return['axis']
-                else:
-                    for type in Species:
-                        A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
-                        to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1]))
-                        to_return[type]['axis'] = axis[type]
-                    return to_return
+
+                    A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
+                    to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1]))
+                    to_return[type]['axis'] = axis[type]
+                return to_return
 
             for type in Species:
                 if File is None:
                     SaveFile = f"{type}_angle_energies"
                 else: SaveFile = File
-                tasks = [(i, self, 'AngleEnergyPlot', type, AngleOffset, Angles, YMin, YMax, XMax, SaveFile, Z, Averaged) for i in range(self.LenSim)]
+                tasks = [(i, self, 'AngleEnergyPlot', type, AngleOffset, Angles, YMin, YMax, XMax, SaveFile, Z, Averaged, DataOnly) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 if self.Log: print(f"\nPlotting {type} angle energies")
@@ -898,7 +905,7 @@ class Process():
                     futs = [ex.submit(Iter_Plot, t) for t in tasks]
                     try:
                         for fut in as_completed(futs):
-                            i, err, tb = fut.result()
+                            i, data, err, tb = fut.result()
                             if err:
                                 Print_Error(futs, ex, i, err, tb)
                             else:
@@ -917,8 +924,8 @@ class Process():
                     print(f"\nMovies saved in {self.pros_path}")
         
         elif MultiPros:
-            fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
             type = Species
+            fig, ax = plt.subplots(num=3,clear=True, figsize=(8,6))
             spect_to_plot, axis = self.GetData("dist_fn_xy_energy", type, ['theta', 'ekin'], Iter, Z=Z)
             ymax = 0 if YMax is None else YMax
             for j in Angles:
@@ -1014,7 +1021,7 @@ class Process():
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
                 try:
                     for fut in as_completed(futs):
-                        i, err, tb = fut.result()
+                        i, data, err, tb = fut.result()
                         if err:
                             Print_Error(futs, ex, i, err, tb)
                         else:
@@ -1117,7 +1124,6 @@ class Process():
             XMin = XMin*1e15
         if XMax is not None and abs(XMax) < 1:
             XMax = XMax*1e15
-        spect_to_plot={}
         axis={}
         fig, ax = plt.subplots(clear=True, figsize=(8,6))
         fig2, ax2 = plt.subplots(clear=True, figsize=(8,6))
@@ -1253,7 +1259,7 @@ class Process():
                     futs = [ex.submit(Iter_Plot, t) for t in tasks]
                     try:
                         for fut in as_completed(futs):
-                            i, err, tb = fut.result()
+                            i, data, err, tb = fut.result()
                             if err:
                                 Print_Error(futs, ex, i, err, tb)
                             else:

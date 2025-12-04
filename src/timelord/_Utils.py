@@ -513,12 +513,12 @@ def convert_one(args):
 def Iter_Plot(args):
     import traceback
     try:
-        getattr(args[1], args[2])(*args[3:], MultiPros=True, Iter=args[0])
-        return (args[0], None, None)  # success
+        data = getattr(args[1], args[2])(*args[3:], MultiPros=True, Iter=args[0])
+        return (args[0], data, None, None)  # success
     except BaseException as e:
         tb = traceback.format_exc()
         err = f"{type(e).__name__}: {e}"
-        return (args[0], err, tb)
+        return (args[0], None, err, tb)
 
 def Print_Error(futs, ex, i, err, tb):
     # cancel everything that hasn’t started yet
