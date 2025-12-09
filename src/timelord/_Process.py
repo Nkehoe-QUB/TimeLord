@@ -66,14 +66,17 @@ class Process():
         self.Geo = Geo
         if self.Geo not in ['cart', 'cyl']:
             raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
-        try:
+        visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
+        if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
+            raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
+        if f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5' in os.listdir(self.SimulationPath):
             with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
                 try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
                 except: self.Dim = 2
-        except:
-            with sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf')) as file:
-                try: self.Dim = len(file.Electric_Field_Ey.dims)
-                except: self.Dim = 2
+        else:
+            tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+            try: self.Dim = len(tmp.Electric_Field_Ey.dims)
+            except: self.Dim = 2
         AvailMem = get_available_memory()
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
@@ -81,10 +84,6 @@ class Process():
         Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
         Message += f"Available memory is \033[1;33m{AvailMem/1e9:.2f}\033[0m GB\n" if AvailMem is not None else "\033[1;31mCould not determine available memory\033[0m\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
-        visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
-
-        if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
-            raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
         if Prefix:
             with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
                 text = f.readlines()
@@ -762,7 +761,8 @@ class Process():
                         YMin = -YMin
                     YMax = -YMin
             if DataOnly:
-                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in Species}
+            #     to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in Species}
+                to_return = {}
             for type in Species:
                 if File is None:
                     SaveFile = f"{type}_angles"
@@ -782,10 +782,12 @@ class Process():
                             else:
                                 done += 1
                                 if DataOnly:
-                                    to_return[type]['data'][i] = data['data']
-                                    tmp = data['axis']
+                                    if len(to_return.keys()) == 0:
+                                        to_return[type] = {'data': np.zeros((self.LenSim, data[0].shape[0], data[0].shape[1])), 'axis': defaultdict(list)}
+                                    to_return[type]['data'][i, :, :] = data[0]
+                                    tmp = data[1]
                                     for k, v in tmp.items():                 # axis[type] is a dict
-                                        if i == 0:
+                                        if k not in to_return[type]['axis'].keys():
                                             if k == 'Time':
                                                 to_return[type]['axis'][k] = np.empty((self.LenSim))
                                             else:
@@ -800,7 +802,7 @@ class Process():
                         # make sure we don't block on shutdown; it's idempotent
                         ex.shutdown(wait=False, cancel_futures=True)
                 if DataOnly:
-                    print("\nReturning data only")
+                    if self.Log: print("\nReturning data only")
                     return to_return
                 print(f"\nDensities saved in {self.raw_path}")
                 if self.Movie:
@@ -882,15 +884,13 @@ class Process():
                 if len(Angles) > 1:
                     raise ValueError("DataOnly can only be used with a single angle")
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in Species}
-                spect_to_plot = {}
-                axis = {}
                 for type in Species:
-                    tmp = self.AnglePlot(type, DataOnly=True, Z=Z)
-                    spect_to_plot[type], axis[type] = tmp[0], tmp[1]
+                    tmp = self.AnglePlot(type, DataOnly=True, Z=Z)[type]
+                    spect_to_plot, axis = tmp['data'], tmp['axis']
 
-                    A_arg = np.argwhere(abs(axis[type]['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
-                    to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[type][:, A_arg,:], axis=1), (spect_to_plot[type].shape[0], spect_to_plot[type].shape[-1]))
-                    to_return[type]['axis'] = axis[type]
+                    A_arg = np.argwhere(abs(axis['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
+                    to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[:, A_arg,:], axis=1), (spect_to_plot.shape[0], spect_to_plot.shape[-1]))
+                    to_return[type]['axis'] = axis
                 return to_return
 
             for type in Species:
