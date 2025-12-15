@@ -206,11 +206,17 @@ class Process():
         Returns: bool
         """
         if self.Geo == 'cart':
-            File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
-            try: File[f"SDF/{Diag}"][:]
+            try:
+                File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
+                File[f"SDF/{Diag}"][:]
             except:
                 File.close()
-                raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
+                try:
+                    File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0001.h5"), 'r')
+                    File[f"SDF/{Diag}"][:]
+                except:
+                    File.close()
+                    raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
             File.close()
             return True
         elif self.Geo == 'cyl':
@@ -358,7 +364,7 @@ class Process():
         File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, Start=0, End=None, MultiPros=False, Iter=None):
         """Plot density or average energy density for specified species and/or electric field.
         Parameters:
         -----------
@@ -432,6 +438,8 @@ class Process():
                     print("Number of colours must match number of species\nSetting colours to 'jet'")
                     Colours = None
                 else: Colours = [Colours]
+            if End is None:
+                End = self.LenSim
             if self.Log:
                 if DataOnly: print(f"\nGetting {Species} {'average energy 'if EkBar else ''}densities {f'and/or {Field} field data' if Field else f'and/or {FieldAvg} field data' if FieldAvg else 'only'}")
                 else:
@@ -449,7 +457,7 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(self.LenSim)]
+            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
             done = 0
             last_idx = -1
             if DataOnly:
@@ -477,9 +485,9 @@ class Process():
                                         to_return[type]['axis'][k][i] = v
                             done += 1
                             # keep your existing percentage display
-                            idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                            idx_equiv = int((done - 1) * (End - Start - 1) / max(1, End - Start - 1))
                             if idx_equiv != last_idx:
-                                if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                if self.Log: PrintPercentage(idx_equiv, End - 1)
                                 last_idx = idx_equiv
                 finally:
                     # make sure we don't block on shutdown; it's idempotent
@@ -489,7 +497,7 @@ class Process():
                 return to_return
             print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
-                MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                MakeMovie(self.raw_path, self.pros_path, Start, End, SaveFile)
                 print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
