@@ -643,7 +643,7 @@ class Process():
                                     to_return[type]['data'][i] = data[type]['data']
                                     tmp = data[type]['axis']
                                     for k, v in tmp.items():                 # axis[type] is a dict
-                                        if i == 0:
+                                        if k not in to_return[type]['axis'].keys():
                                             if k == 'Time':
                                                 to_return[type]['axis'][k] = np.empty((self.LenSim))
                                             else:
