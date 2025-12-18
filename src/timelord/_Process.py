@@ -426,9 +426,17 @@ class Process():
                         else: self.DiagCheck(f"Derived_Number_Density_{type}")
                     else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if Field:
-                self.DiagCheck(f"Electric_Field_{Field}")
+                if 'E' in Field: 
+                    self.DiagCheck(f"Electric_Field_{Field}")
+                elif 'B' in Field:
+                    self.DiagCheck(f"Magnetic_Field_{Field}")
+                else: raise ValueError("Field must start with 'E' or 'B'")
             if FieldAvg:
-                self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
+                if 'E' in FieldAvg:
+                    self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
+                elif 'B' in FieldAvg:
+                    self.DiagCheck(f"Magnetic_Field_{FieldAvg}_averaged")
+                else: raise ValueError("FieldAvg must start with 'E' or 'B'")
             if Colours is not None and not isinstance(Colours, list):
                 if not isinstance(Colours, str):
                     raise ValueError("Colours must be a list of strings")
@@ -507,14 +515,20 @@ class Process():
                 if FieldAvg: to_include.append(FieldAvg)
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
                 if Field:
-                    E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                    to_return[Field]['data'] = np.array(E_data)
-                    for k, v in E_axis.items():
+                    if 'E' in Field:
+                        F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    elif 'B' in Field:
+                        F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    to_return[Field]['data'] = np.array(F_data)
+                    for k, v in F_axis.items():
                         to_return[Field]['axis'][k] = np.array(v)
                 elif FieldAvg:
-                    E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                    to_return[FieldAvg]['data'] = np.array(E_data)
-                    for k, v in E_axis.items():
+                    if 'E' in FieldAvg:
+                        F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    elif 'B' in FieldAvg:
+                        F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    to_return[FieldAvg]['data'] = np.array(F_data)
+                    for k, v in F_axis.items():
                         to_return[FieldAvg]['axis'][k] = np.array(v)
                 if Species:
                     for type in Species:
@@ -528,9 +542,15 @@ class Process():
             den_to_plot={}
             axis={}
             if Field:
-                E_data, E_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                if 'E' in Field:
+                    F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                elif 'B' in Field:
+                    F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
             elif FieldAvg:
-                E_data, E_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                if 'E' in FieldAvg:
+                    F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                elif 'B' in FieldAvg:
+                    F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
@@ -559,9 +579,9 @@ class Process():
                     alpha = 1 - (1 - np.abs(np.linspace(-1, 1, 256)) )**2   # Creates a peak at center
                     base[:, -1] = alpha
                     transparent_cmap = cm.ListedColormap(base)
-                    E = Field if Field else FieldAvg
-                    FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
-                    cax1=ax.pcolormesh(E_axis['x'], E_axis['y'], E_data.T, cmap=transparent_cmap, norm=cm.CenteredNorm(halfrange=np.nanmax(E_data.T) if FMax is None else FMax), zorder=len(Species)+1)
+                    F = Field if Field else FieldAvg
+                    FUnit = 'V/m' if 'E' in F else 'T'
+                    cax1=ax.pcolormesh(F_axis['x'], F_axis['y'], F_data.T, cmap=transparent_cmap, norm=cm.CenteredNorm(halfrange=np.nanmax(F_data.T) if FMax is None else FMax), zorder=len(Species)+1)
                     cbar1 = fig.colorbar(cax1, aspect=50)
                     cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 ax.set(xlim=(XMin if XMin is not None else None, XMax if XMax is not None else None),
@@ -571,19 +591,19 @@ class Process():
                     E = Field if Field else FieldAvg
                     FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     if not Species:
-                        ax.plot(E_axis['x'], E_data, label=Field if Field else FieldAvg)
-                        ax.set(ylim=(-np.nanmax(E_data) if FMax is None else -FMax, np.nanmax(E_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax.plot(F_axis['x'], F_data, label=Field if Field else FieldAvg)
+                        ax.set(ylim=(-np.nanmax(F_data) if FMax is None else -FMax, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                     else:
                         ax2 = ax.twinx()
-                        ax2.plot(E_axis['x'], E_data, 'r', label=Field if Field else FieldAvg)
-                        ax2.set(ylim=(-np.nanmax(E_data) if FMax is None else -FMax, np.nanmax(E_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax2.plot(F_axis['x'], F_data, 'r', label=Field if Field else FieldAvg)
+                        ax2.set(ylim=(-np.nanmax(F_data) if FMax is None else -FMax, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
                     ax.set(ylim=(1e-3 if YMin is None else YMin, 1e3 if YMax is None else YMax), ylabel=f'N {"[$N_c$]" if not EkBar else "[MeV]"}', yscale='log',
                            xlim=(np.min(axis[type]['x']) if XMin is None else XMin, np.max(axis[type]['x']) if XMax is None else XMax))
             if Species: ax.set_title(f"{axis[type]['Time']}fs")
-            else: ax.set_title(f"{E_axis['Time']}fs")
+            else: ax.set_title(f"{F_axis['Time']}fs")
             ax.grid(True)
             ax.set_xlabel(r'x [$\mu$m]')
             fig.tight_layout()
