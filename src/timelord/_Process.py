@@ -104,11 +104,11 @@ class Process():
             self.LenSim = LenHDF
             Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
         else:
-            if self.Dim <= 2:
-                ConvData = True
-            else:
-                ConvData = False
-                Message += f"\n\033[1;33m3D Simulations are not converted to HDF5 format. Skipping conversion.\033[0m\n"
+            ConvData = True
+            if self.Dim > 2:
+                if self.workers < 5:
+                    self.workers = 1
+                    Message += f"\n\033[1;33m3D Simulations only use 1 worker.\033[0m\n"
             self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF -1 if LenSDF != LenHDF else LenSDF
         if ConvData:
             if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
