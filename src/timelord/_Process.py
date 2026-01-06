@@ -1186,7 +1186,7 @@ class Process():
         plt.close(fig2)
         print(f"\nEnergy time plots saved in {self.pros_path}")
 
-    def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, MultiPros=False, Iter=None):
+    def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, dx=1, dy=1, MultiPros=False, Iter=None):
         """Plot phase space for specified species.
         Parameters:
         -----------
@@ -1281,7 +1281,7 @@ class Process():
                 tmp_cbmin = CBMin[Species.index(type)] if CBMin is not None else None
                 tmp_cbmax = CBMax[Species.index(type)] if CBMax is not None else None
                 if self.Log: print(f"\nPlotting {type} phase space {Phase}")
-                tasks = [(i, self, 'PhaseSpacePlot', type, Phase, tmp_cbmin, tmp_cbmax, tmp_ymin, tmp_ymax, tmp_xmin, tmp_xmax, SaveFile, Z) for i in range(self.LenSim)]
+                tasks = [(i, self, 'PhaseSpacePlot', type, Phase, tmp_cbmin, tmp_cbmax, tmp_ymin, tmp_ymax, tmp_xmin, tmp_xmax, SaveFile, Z, dx, dy) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -1330,7 +1330,7 @@ class Process():
                 ylabel = 'p' + phase_axis[1][1:] + ' [kgm/s]'
                 clabel1 += 'dP'
                 clabel2 += 'kgm/s)]'
-            phase_to_plot, axis = self.GetData(f"dist_fn_{Phase}", type, phase_axis, Iter, Z=Z)
+            phase_to_plot, axis = self.GetData(f"dist_fn_{Phase}", type, phase_axis, Iter, Z=Z, dx=dx, dy=dy)
             cmin = CBMin if CBMin is not None else np.nanmin(phase_to_plot[phase_to_plot>0]) if np.nanmin(phase_to_plot[phase_to_plot>0]) > 1e5 else 1e5
             cmax = CBMax if CBMax is not None else np.nanmax(phase_to_plot) if np.nanmax(phase_to_plot) > 1e9 else 1e9
             cax = ax.pcolormesh(axis[phase_axis[0]], axis[phase_axis[1]], phase_to_plot.T, cmap=cmaps.batlowW, norm=cm.LogNorm(vmin=cmin, vmax=cmax))
