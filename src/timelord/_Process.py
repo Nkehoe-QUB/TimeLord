@@ -1159,7 +1159,8 @@ class Process():
 
         for type in Species:
             SaveFile= File if File is not None else f"{type}" if type == Species[0] else SaveFile + f"_{type}" 
-            _, axis[type] = self.SpectraPlot(Species=type, Z=Z, DataOnly=True)
+            tmp = self.SpectraPlot(Species=type, Z=Z, DataOnly=True)
+            axis[type] = tmp[type]['axis']
             ax.plot(axis[type]['Time'], MovingAverage(np.nanmax(axis[type]['ekin'], axis=1), 3) if Average else np.nanmax(axis[type]['ekin'], axis=1),
                     label=type, color=self.Colours[type] if type in self.Colours.keys() else None)
             ax2.plot(axis[type]['Time'][1:], MovingAverage(np.diff(np.nanmax(axis[type]['ekin'], axis=1))/np.diff(axis[type]['Time']), 3)if Average else np.diff(np.nanmax(axis[type]['ekin'], axis=1))/np.diff(axis[type]['Time']),
