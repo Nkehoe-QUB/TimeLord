@@ -74,7 +74,8 @@ class Process():
                 try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
                 except: self.Dim = 2
         else:
-            tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+            try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+            except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
             try: self.Dim = len(tmp.Electric_Field_Ey.dims)
             except: self.Dim = 2
         AvailMem = get_available_memory()
@@ -84,6 +85,9 @@ class Process():
         Message += f"\nUsing \033[1;33m{self.workers}\033[0m workers for parallel processing.\n"
         Message += f"Available memory is \033[1;33m{AvailMem/1e9:.2f}\033[0m GB\n" if AvailMem is not None else "\033[1;31mCould not determine available memory\033[0m\n"
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
+        else:
+            print(Message)
+            Message = ''
         if Prefix:
             with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
                 text = f.readlines()
@@ -265,7 +269,7 @@ class Process():
         if Averaged:
             attr += "_averaged"
 
-        if self.Test: print(f"Processing file {t:04d}.sdf")
+        if self.Test: print(f"Processing file {t:04d}.h5")
         if self.Dim == 3 and Diag == "Electric_Field":
             File = sh.getdata(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.sdf"), verbose=False)
             Axis['x'] = File.Grid_Grid_mid.data[0]/ self.micro
@@ -301,7 +305,10 @@ class Process():
             raise ValueError("Only Electric_Field diagnostic is supported for 3D simulations")
         
         File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
-        Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
+        if Averaged and t == 0:
+            Grid_ID = None
+        else:
+            Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
 
         for axis in AxisNames:
             if self.Test: print(f"Processing axis: {axis}")
@@ -327,7 +334,7 @@ class Process():
                         print(f"Warning: dy = {dy} is too large. Setting dy = 4")
                         dy = 4
                     Axis["y"] = Axis["y"][np.s_[::dy]]
-            else:
+            elif Grid_ID is not None:
                 if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
                 else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
                 Axis[axis] = np.reshape(Axis[axis], np.max(Axis[axis].shape))
@@ -980,7 +987,7 @@ class Process():
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
 
-    def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
+    def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0.5, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
         """Plot lineouts of specified species densities and electric fields.
         Parameters:
         -----------
@@ -1222,8 +1229,9 @@ class Process():
             if not Species:
                 raise ValueError("No species were provided")
             if Phase is None:
-                print("No phase space were provided! Defaulting to x-px")
-                Phase = 'x-px'
+                print("No phase space were provided! Defaulting to x_px")
+                Phase = 'x_px'
+            
             if not isinstance(Species, list):
                 Species = [Species]
             for type in Species:
@@ -1310,6 +1318,10 @@ class Process():
             type = Species
             fig, ax = plt.subplots(clear=True, figsize=(8,6))
             phase_axis = Phase.split('_')
+            if 'lim' in phase_axis:
+                phase_axis.remove('lim')
+                if self.Test:
+                    print('Removing lim from phase axis for testing purposes')
             if 'energy' in phase_axis:
                 phase_axis[phase_axis.index('energy')] = 'ekin'
             clabel1 = 'dN/'
