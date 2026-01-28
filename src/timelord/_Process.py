@@ -148,12 +148,18 @@ class Process():
                     lmatch = re.search(r'^\s*lambda_las\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch:
                         if Test: print(f"Found lambda_las: {lmatch.group(1)} * {lmatch.group(2)}")
-                        lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
+                        try: lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
+                        except AttributeError: 
+                            if lmatch.group(2) == 'micron':
+                                lambda_las = float(lmatch.group(1)) * self.micro
                         l_found=True
                     lmatch = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if lmatch:
                         if Test: print(f"Found lambda0: {lmatch.group(1)} * {lmatch.group(2)}")
-                        lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
+                        try: lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
+                        except AttributeError:
+                            if lmatch.group(2) == 'micron':
+                                lambda_las = float(lmatch.group(1)) * self.micro
                         l_found=True
                 if not x_found:
                     xmatch = re.search(r'^\s*xMin\s*=\s*-([\d.]+)\s*\*\s*(\w+)', line)
