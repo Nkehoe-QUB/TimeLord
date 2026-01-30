@@ -498,7 +498,7 @@ class Process():
                                 for type in to_include:
                                     to_return[type]['data'][i] = data[type]['data']
                                     for k, v in data[type]['axis'].items():
-                                        if i == 0:
+                                        if k not in to_return[type]['axis'].keys():
                                             if k == 'Time':
                                                 to_return[type]['axis'][k] = np.empty((self.LenSim))
                                             else:
@@ -929,7 +929,7 @@ class Process():
                     tmp = self.AnglePlot(type, DataOnly=True, Z=Z)[type]
                     spect_to_plot, axis = tmp['data'], tmp['axis']
 
-                    A_arg = np.argwhere(abs(axis['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles[0]))
+                    A_arg = np.argwhere(abs(axis['theta'][0]-np.radians(AngleOffset))<=np.radians(Angles))
                     to_return[type]['data'] = np.reshape(np.sum(spect_to_plot[:, A_arg,:], axis=1), (spect_to_plot.shape[0], spect_to_plot.shape[-1]))
                     to_return[type]['axis'] = axis
                 return to_return
