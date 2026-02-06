@@ -347,7 +347,7 @@ class Process():
 
         if Averaged and t == 0:
             Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
-            print("Skipped averaging for the first file")
+            if self.Log: print("Skipped averaging for the first file")
         else:
             Den = File[f"SDF/{attr}"][:]
             if dx != 1:
@@ -514,12 +514,12 @@ class Process():
                     # make sure we don't block on shutdown; it's idempotent
                     ex.shutdown(wait=False, cancel_futures=True)
             if DataOnly:
-                print("\nReturning Data")
+                if self.Log: print("\nReturning Data")
                 return to_return
-            print(f"\nDensities saved in {self.raw_path}")
+            if self.Log: print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, Start, End, SaveFile)
-                print(f"\nMovies saved in {self.pros_path}")
+                if self.Log: print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
             if DataOnly:
@@ -700,12 +700,12 @@ class Process():
                     # make sure we don't block on shutdown; it's idempotent
                     ex.shutdown(wait=False, cancel_futures=True)
             if DataOnly:
-                print("\nReturning data only")
+                if self.Log: print("\nReturning data only")
                 return to_return
-            print(f"\nDensities saved in {self.raw_path}")
+            if self.Log: print(f"\nDensities saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                print(f"\nMovies saved in {self.pros_path}")
+                if self.Log: print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
             if DataOnly:
@@ -845,10 +845,10 @@ class Process():
                 if DataOnly:
                     if self.Log: print("\nReturning data only")
                     return to_return
-                print(f"\nDensities saved in {self.raw_path}")
+                if self.Log: print(f"\nDensities saved in {self.raw_path}")
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                    print(f"\nMovies saved in {self.pros_path}")
+                    if self.Log: print(f"\nMovies saved in {self.pros_path}")
 
         elif MultiPros:
             type = Species
@@ -959,10 +959,10 @@ class Process():
                     finally:
                         # make sure we don't block on shutdown; it's idempotent
                         ex.shutdown(wait=False, cancel_futures=True)
-                print(f"\nAngle energies saved in {self.raw_path}")
+                if self.Log: print(f"\nAngle energies saved in {self.raw_path}")
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                    print(f"\nMovies saved in {self.pros_path}")
+                    if self.Log: print(f"\nMovies saved in {self.pros_path}")
         
         elif MultiPros:
             type = Species
@@ -1075,10 +1075,10 @@ class Process():
                 finally:
                     # make sure we don't block on shutdown; it's idempotent
                     ex.shutdown(wait=False, cancel_futures=True)
-            print(f"\nLineouts saved in {self.raw_path}")
+            if self.Log: print(f"\nLineouts saved in {self.raw_path}")
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                print(f"\nMovies saved in {self.pros_path}")
+                if self.Log: print(f"\nMovies saved in {self.pros_path}")
             
         elif MultiPros:
             
@@ -1197,9 +1197,9 @@ class Process():
         plt.close(fig)
         fig2.savefig(self.pros_path + '/' + SaveFile + '_energy_time_deriv.png',dpi=200)
         plt.close(fig2)
-        print(f"\nEnergy time plots saved in {self.pros_path}")
+        if self.Log: print(f"\nEnergy time plots saved in {self.pros_path}")
 
-    def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, dx=1, dy=1, MultiPros=False, Iter=None):
+    def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, dx=1, dy=1, DataOnly=False, MultiPros=False, Iter=None):
         """Plot phase space for specified species.
         Parameters:
         -----------
@@ -1223,6 +1223,8 @@ class Process():
             Filename to save the plots (default is None, auto-generated).
         Z : int, optional
             Number of nucleons for energy normalization (required for 'ekin' axis).
+        DataOnly : bool, optional
+            If True, return data instead of plotting (default is False).
         MultiPros : bool, optional
             If True, use multiprocessing for plotting (default is False).
         Iter : int, optional
@@ -1284,6 +1286,8 @@ class Process():
                     if len(CBMax) != 1:
                         raise ValueError("CBMax must be a list of the same length as Species or a single value")
                     else: CBMax = CBMax * len(Species)
+            if DataOnly:
+                to_return = {}
             for type in Species:
                 if File is None:
                     SaveFile=f"{Species[0]}_{Phase}_phase"
@@ -1295,7 +1299,7 @@ class Process():
                 tmp_cbmin = CBMin[Species.index(type)] if CBMin is not None else None
                 tmp_cbmax = CBMax[Species.index(type)] if CBMax is not None else None
                 if self.Log: print(f"\nPlotting {type} phase space {Phase}")
-                tasks = [(i, self, 'PhaseSpacePlot', type, Phase, tmp_cbmin, tmp_cbmax, tmp_ymin, tmp_ymax, tmp_xmin, tmp_xmax, SaveFile, Z, dx, dy) for i in range(self.LenSim)]
+                tasks = [(i, self, 'PhaseSpacePlot', type, Phase, tmp_cbmin, tmp_cbmax, tmp_ymin, tmp_ymax, tmp_xmin, tmp_xmax, SaveFile, Z, dx, dy, DataOnly) for i in range(self.LenSim)]
                 done = 0
                 last_idx = -1
                 with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -1307,6 +1311,18 @@ class Process():
                                 Print_Error(futs, ex, i, err, tb)
                             else:
                                 done += 1
+                                if DataOnly:
+                                    if len(to_return.keys()) == 0:
+                                        to_return[type] = {'data': np.zeros((self.LenSim, data[0].shape[0], data[0].shape[1])), 'axis': defaultdict(list)}
+                                    to_return[type]['data'][i, :, :] = data[0]
+                                    tmp = data[1]
+                                    for k, v in tmp.items():                 # axis[type] is a dict
+                                        if k not in to_return[type]['axis'].keys():
+                                            if k == 'Time':
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim))
+                                            else:
+                                                to_return[type]['axis'][k] = np.empty((self.LenSim, v.shape[0]))
+                                        to_return[type]['axis'][k][i] = v
                                 # keep your existing percentage display
                                 idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
                                 if idx_equiv != last_idx:
@@ -1315,14 +1331,15 @@ class Process():
                     finally:
                         # make sure we don't block on shutdown; it's idempotent
                         ex.shutdown(wait=False, cancel_futures=True)
-
-                print(f"\nPhase spaces saved in {self.raw_path}")
+                if DataOnly:
+                    if self.Log: print("\nReturning data only")
+                    return to_return
+                if self.Log: print(f"\nPhase spaces saved in {self.raw_path}")
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-                    print(f"\nMovies saved in {self.pros_path}")
+                    if self.Log: print(f"\nMovies saved in {self.pros_path}")
         elif MultiPros:
             type = Species
-            fig, ax = plt.subplots(clear=True, figsize=(8,6))
             phase_axis = Phase.split('_')
             if 'lim' in phase_axis:
                 phase_axis.remove('lim')
@@ -1330,6 +1347,10 @@ class Process():
                     print('Removing lim from phase axis for testing purposes')
             if 'energy' in phase_axis:
                 phase_axis[phase_axis.index('energy')] = 'ekin'
+            if DataOnly:
+                phase_to_plot, axis = self.GetData(f"dist_fn_{Phase}", type, phase_axis, Iter, Z=Z, dx=dx, dy=dy)
+                return phase_to_plot, axis
+            fig, ax = plt.subplots(clear=True, figsize=(8,6))
             clabel1 = 'dN/'
             clabel2 = ' [particles/'
             if 'p' in phase_axis[0]:
