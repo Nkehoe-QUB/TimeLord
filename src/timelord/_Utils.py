@@ -78,7 +78,7 @@ def MakeMovie(GraphFolder, OutputFolder, initialfile, finalfile, quantity):
     h = cv2.imread(os.path.join(GraphFolder, quantity + '_' + str(initialfile) + '.png'))
     height = h.shape[0]
     width = h.shape[1]
-    FPS = 1.0
+    FPS = 6.0
     fourcc = VideoWriter_fourcc(*'mp4v')
     folder_path = OutputFolder
     if not(os.path.exists(folder_path) and os.path.isdir(folder_path)):

@@ -12,16 +12,25 @@ import matplotlib.colors as cm
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import inspect
+try:
+    import sdf_helper as sh
+except:
+    pass
+try:
+    import happi
+except:
+    pass
 from ._Utils import *
-import sdf_helper as sh
 
 class Process():
-    def __init__(self, SimName=".", Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
+    def __init__(self, SimName=".", Code=None, Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
         """Initialize TimeLord Process class.
         Parameters: 
         -----------
         SimName : str, optional (default is current directory)
             Path to the simulation folder.
+        Code : str, optional
+            PIC code to process
         Ped : float, optional
             Pedestal time to add to t0 in seconds or picoseconds (if >1).
         Log : bool, optional
@@ -62,23 +71,9 @@ class Process():
         self.Test = Test
         self.Colours = {'electron': 'r', 'proton': 'b', 'carbon': 'k'}
         self.workers = pick_safe_workers()
-        self.FilePrefix = False
-        self.Geo = Geo
-        if self.Geo not in ['cart', 'cyl']:
-            raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
-        visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
-        if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
-            raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
-        if f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5' in os.listdir(self.SimulationPath):
-            with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
-                try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
-                except: self.Dim = 2
-        else:
-            try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
-            except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
-            try: self.Dim = len(tmp.Electric_Field_Ey.dims)
-            except: self.Dim = 2
         AvailMem = get_available_memory()
+        self.FilePrefix = False
+        FileList = os.listdir(self.SimulationPath)
         ascii_banner = pyfiglet.figlet_format("TimeLord")
         if self.Log: print(f"\033[1;34m{ascii_banner}\033[0m")
         Message = "Use \033[1;33mHelp()\033[0m to see available functions.\n"
@@ -87,59 +82,117 @@ class Process():
         if not self.Log: print('\033[1;31mMessage printing surpressed.\033[0m')
         else:
             print(Message)
-            Message = ''
-        if Prefix:
-            with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
-                text = f.readlines()
-                if len(text[0].replace('\n','').split('.')[0]) > 4:
-                    self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
-        LenSDF = len([
-            int(os.path.splitext(os.path.basename(i))[0])
-            for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
-        ])
-        LenHDF = len([
-            int(os.path.splitext(os.path.basename(i))[0])
-            for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
-        ])
-        if LenSDF == 0:
-            if LenHDF == 0:
-                raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
-            ConvData = False
-            self.LenSim = LenHDF
-            Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+            Message = ""
+        if Code:
+            self.Code = Code
+        elif "smilei.py" in FileList:
+            self.Code = "SMILEI"
+        elif "input.deck" in FileList:
+            self.Code = "EPOCH"
         else:
-            ConvData = True
-            if self.Dim > 2:
-                if self.workers < 5:
-                    self.workers = 1
-                    Message += f"\n\033[1;33m3D Simulations only use 1 worker.\033[0m\n"
-            self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
-        if ConvData:
-            if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
+            raise ValueError("\033[1;31mCouldn't determine which PIC code. Set input arg 'Code'\033[0m")
+        Message += f"\nProcessing for PIC code: \033[1;33m{self.Code}\033[0m"
 
-            tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
-            total_tasks = self.LenSim
-            done = 0
-            last_idx = -1
-            with ProcessPoolExecutor(max_workers=self.workers) as ex:
-                futs = [ex.submit(convert_one, t) for t in tasks]
-                for fut in as_completed(futs):
-                    try:
-                        _ = fut.result()
-                    except Exception as e:
-                        raise
-                    done += 1
-                    # keep your existing percentage display
-                    idx_equiv = int((done - 1) * (total_tasks - 1) / max(1, total_tasks - 1))
-                    if idx_equiv != last_idx:
-                        if self.Log: PrintPercentage(idx_equiv, total_tasks - 1)
-                        last_idx = idx_equiv
-            Message = "\n\n" + Message
+        if self.Code == "SMILEI":
+            self.Units = ["um", "fs", "MeV", "V/m", "kg*m/s", 'um^-3*MeV^-1', 'm^-3*kg^-1*(m/s)^-1', 'T']
+            Simulation = happi.Open(self.SimulationPath, verbose=False, scan=False)
+            if Simulation == "Invalid Smilei simulation":
+                raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+            # else: Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m loaded\n"
+            InFile = "smilei.py"
+            self.LenSim = len(Simulation.Field(0, "Ey").getTimesteps())
+            self.Box = {}
+            self.Res = {}
+            self.Box['x'] = float(Simulation.namelist.Main.grid_length[0])
+            self.Res['x'] = float(Simulation.namelist.Main.cell_length[0])
+        
+            if "cartesian" in Simulation.namelist.Main.geometry:
+                self.Geo = "cart"
+                self.Dim = int(Simulation.namelist.Main.geometry.split('D')[0])
+                if self.Dim > 1:
+                    self.Box['y'] = float(Simulation.namelist.Main.grid_length[1])
+                    self.Res['y'] = float(Simulation.namelist.Main.cell_length[1])
+                
+            elif "cylindrical" in Simulation.namelist.Main.geometry:
+                self.Geo = "Cyl"
+                self.Dim = 3
+                self.Modes = int(Simulation.namelist.Main.number_of_AM)
+
+
+
+
+
+        
+        elif self.Code == "EPOCH":
+            InFile = "input.deck"
+
+            self.Geo = Geo
+            if self.Geo not in ['cart', 'cyl']:
+                raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
+            visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
+            if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
+                raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
+            if f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5' in os.listdir(self.SimulationPath):
+                with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
+                    try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+                    except: self.Dim = 2
+            else:
+                try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+                except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
+                try: self.Dim = len(tmp.Electric_Field_Ey.dims)
+                except: self.Dim = 2
+        
+            if Prefix:
+                with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
+                    text = f.readlines()
+                    if len(text[0].replace('\n','').split('.')[0]) > 4:
+                        self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
+            LenSDF = len([
+                int(os.path.splitext(os.path.basename(i))[0])
+                for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
+            ])
+            LenHDF = len([
+                int(os.path.splitext(os.path.basename(i))[0])
+                for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
+            ])
+            if LenSDF == 0:
+                if LenHDF == 0:
+                    raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+                ConvData = False
+                self.LenSim = LenHDF
+                Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+            else:
+                ConvData = True
+                if self.Dim > 2:
+                    if self.workers < 5:
+                        self.workers = 1
+                        Message += f"\n\033[1;33m3D Simulations only use 1 worker.\033[0m\n"
+                self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
+            if ConvData:
+                if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
+
+                tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
+                total_tasks = self.LenSim
+                done = 0
+                last_idx = -1
+                with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                    futs = [ex.submit(convert_one, t) for t in tasks]
+                    for fut in as_completed(futs):
+                        try:
+                            _ = fut.result()
+                        except Exception as e:
+                            raise
+                        done += 1
+                        # keep your existing percentage display
+                        idx_equiv = int((done - 1) * (total_tasks - 1) / max(1, total_tasks - 1))
+                        if idx_equiv != last_idx:
+                            if self.Log: PrintPercentage(idx_equiv, total_tasks - 1)
+                            last_idx = idx_equiv
+                Message = "\n\n" + Message
 
         Message += f"\nSimulation \033[1;32m{self.SimulationPath}\033[0m found with {self.LenSim} timesteps\n"
         Message += f"Simulation geometry set to \033[1;33m{'Cylindrical' if self.Geo == 'cyl' else 'Cartesian'}\033[0m with {self.Dim} dimensions\n"
-        file_path = f'{self.SimulationPath}/input.deck'
-        with open(file_path, 'r') as file:
+        with open(f"{self.SimulationPath}/{InFile}", 'r') as file:
             l_found=False
             x_found=False
             t_found=False
@@ -153,13 +206,13 @@ class Process():
                             if lmatch.group(2) == 'micron':
                                 lambda_las = float(lmatch.group(1)) * self.micro
                         l_found=True
-                    lmatch = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
-                    if lmatch:
-                        if Test: print(f"Found lambda0: {lmatch.group(1)} * {lmatch.group(2)}")
-                        try: lambda_las = float(lmatch.group(1)) * getattr(self, lmatch.group(2))
+                    lmatch2 = re.search(r'^\s*lambda0\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    if lmatch2:
+                        if Test: print(f"Found lambda0: {lmatch2.group(1)} * {lmatch2.group(2)}")
+                        try: lambda_las = float(lmatch2.group(1)) * getattr(self, lmatch2.group(2))
                         except AttributeError:
-                            if lmatch.group(2) == 'micron':
-                                lambda_las = float(lmatch.group(1)) * self.micro
+                            if lmatch2.group(2) == 'micron':
+                                lambda_las = float(lmatch2.group(1)) * self.micro
                         l_found=True
                 if not x_found:
                     xmatch = re.search(r'^\s*xMin\s*=\s*-([\d.]+)\s*\*\s*(\w+)', line)
@@ -170,23 +223,39 @@ class Process():
                         elif xmatch.group(2) == 'micron':
                             self.x_spot = float(xmatch.group(1)) * self.micro
                         x_found=True
+                    xmatch2 = re.search(r'x_vac\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    if xmatch2:
+                        if hasattr(self, xmatch2.group(2)):
+                            self.x_spot = float(xmatch2.group(1)) * getattr(self, xmatch2.group(2))
+                        elif xmatch2.group(2) == 'micron':
+                            self.x_spot = float(xmatch2.group(1)) * self.micro
+                        x_found=True
                 if not t_found:
                     tmatch = re.search(r'^\s*tau_fwhm_I\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
                     if tmatch:
                         if Test: print(f"Found tau_fwhm_I: {tmatch.group(1)} * {tmatch.group(2)}")
                         self.Tau = float(tmatch.group(1)) * getattr(self, tmatch.group(2))
                         t_found=True
+                    tmatch2 = re.search(r'Tau_I\s*=\s*([\d.]+)\s*\*\s*(\w+)', line)
+                    if tmatch2:
+                        self.Tau = float(tmatch2.group(1)) * getattr(self, tmatch2.group(2))
+                        t_found=True
                 if l_found and t_found and x_found:
                     break
-            if lmatch is None:
+            if lmatch is None and lmatch2 is None:
                 print("\033[1;31mlambda_las or lambda0 not found in simulation file\033[0m")
-            if xmatch is None:
+            if xmatch is None and xmatch2 is None:
                 print("\033[1;31mxMin not found in simulation file! Setting to 0\033[0m")
                 self.x_spot = 0
-            if tmatch is None:
+            if tmatch is None and tmatch2 is None:
                 print("\033[1;31mtau_fwhm_I not found in simulation file! Setting to 0\033[0m")
                 self.Tau = 0
         omega_las = 2.*np.pi*self.c / lambda_las if l_found else 1
+        if self.Code == "SMILEI":
+            self.L_r = self.c / omega_las
+            for a in self.Box.keys():
+                self.Box[a] *= self.L_r
+                self.Res[a] *= self.L_r
         self.den_crit = (self.me * self.epsilon0 * omega_las**2) / self.e**2 if l_found else 1
         self.space_axis = self.space_axis[:self.Dim]
         self.t0=((self.x_spot/self.c)+((2*self.Tau)/(2*np.sqrt(np.log(2)))))/self.femto
@@ -206,7 +275,7 @@ class Process():
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
 
-    def DiagCheck(self, Diag):
+    def DiagCheck(self, Diag, SmileiName=None):
         """Check if a diagnostic exists in the simulation.
         Parameters:
         -----------
@@ -215,23 +284,31 @@ class Process():
         -----------
         Returns: bool
         """
-        if self.Geo == 'cart':
-            try:
-                File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
-                File[f"SDF/{Diag}"][:]
-            except:
-                File.close()
+        if self.Code == "SMILEI":
+            Simulation = happi.Open(self.SimulationPath, verbose=False, scan=False)
+            if Diag not in Simulation.getDiags(SmileiName)[1]:
+                return False
+            else:
+                return True
+        
+        elif self.Code == "EPOCH":
+            if self.Geo == 'cart':
                 try:
-                    File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0001.h5"), 'r')
+                    File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0000.h5"), 'r')
                     File[f"SDF/{Diag}"][:]
                 except:
                     File.close()
-                    raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
-            File.close()
-            return True
-        elif self.Geo == 'cyl':
-            print("Diagnostic check for cylindrical geometry not yet implemented")
-            return True
+                    try:
+                        File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}0001.h5"), 'r')
+                        File[f"SDF/{Diag}"][:]
+                    except:
+                        File.close()
+                        raise ValueError(f"Diagnostic '{Diag}' is not a valid diagnostic")
+                File.close()
+                return True
+            elif self.Geo == 'cyl':
+                print("Diagnostic check for cylindrical geometry not yet implemented")
+                return True
     
     def GetData(self, Diag, Name, AxisNames, t, dx=1, dy=1, Averaged=False, Z=None):
         """Get data from a specific diagnostic at a given timestep.
@@ -264,64 +341,153 @@ class Process():
         Axis : dict
             Dictionary of axis arrays.
         """
-        if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
-        if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
-        Axis = {axis: [] for axis in AxisNames}
-        rel_elec = False
-        if Name == "rel electron":
-            rel_elec = True
-            Name = "electron"
-        attr = Diag + "_" + Name
-        if Averaged:
-            attr += "_averaged"
+        if self.Code == "SMILEI":
+            Simulation = happi.Open(self.SimulationPath, verbose=False, scan=False)
 
-        if self.Test: print(f"Processing file {t:04d}.h5")
-        if self.Dim == 3 and Diag == "Electric_Field":
-            File = sh.getdata(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.sdf"), verbose=False)
-            Axis['x'] = File.Grid_Grid_mid.data[0]/ self.micro
-            
-            Axis['y'] = File.Grid_Grid_mid.data[1]/ self.micro
-            
-            Axis['Time'] = round(float(File.Header['time']) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
-            if Averaged and t == 0:
-                Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
-                print("Skipped averaging for the first file")
+            # Get the data
+            x_offset = self.x_spot
+            if Diag == "ParticleBinning":
+                MetaData = Simulation.ParticleBinning(Name, units=self.Units, timestep_indices=t)
+                axis_names=['x', 'ekin', 'px']
+                if self.Dim == 2:
+                    axis_names.extend(['y', 'user_function0', 'py'])
+                elif self.Dim == 3:
+                    axis_names.extend(['y', 'z', 'user_function0', 'py', 'pz'])
+                
+            elif Diag == "Fields":
+                if self.Geo == "Cyl":
+                    raise ValueError(f"Cylindrical isn't done yet..")
+                    MetaData = Simulation.Field(Name, 'Er', theta=theta, units=self.Units, timestep_indices=t)
+                elif self.Geo == "cart":
+                    MetaData = Simulation.Field("average fields" if Averaged else "instant fields", Name, units=self.Units, timestep_indices=t)
+                axis_names=['x', 'y']
+            else: raise ValueError(f"Diag '{Diag}' is not a valid diagnostic")
+
+            axis ={}
+            axis["Time"] = round(float(MetaData.getTimes()-self.t0), 2)
+            # self.TimeSteps = self.np.array(MetaData.getTimesteps())
+            if Diag == "Fields" and self.Geo == "Cyl":
+                raise ValueError(f"Cylindrical isn't done yet..")
+                Er = self.np.concatenate((-self.np.array(Simulation.Field(Name, 'Er', theta=theta + self.np.pi, units=units).getData())[..., ::-1], Simulation.Field(Name, 'Er', theta=theta, units=units).getData()), axis=-1)
+                Et = self.np.concatenate((-self.np.array(Simulation.Field(Name, 'Et', theta=theta + self.np.pi, units=units).getData())[..., ::-1], Simulation.Field(Name, 'Et', theta=theta, units=units).getData()), axis=-1)
+                if Field == "Ey":
+                    Values = Er * self.np.sin(theta) + Et * self.np.cos(theta)
+                elif Field == "Ex":
+                    Values = Er * self.np.cos(theta) - Et * self.np.sin(theta)
+                elif Field == "Ez":
+                    try: El = self.np.concatenate((-self.np.array(Simulation.Field(Name, 'El', theta=theta + self.np.pi, units=units).getData())[..., ::-1], Simulation.Field(Name, 'El', theta=theta, units=units).getData()), axis=-1)
+                    except ValueError: raise ValueError("El field not found")
+                    Values = El
+                if Name == "average fields":
+                    print('\n\033[1;31mAveraging fields over time\033[0m')
+                    new_size = (Values.shape[0] // 10) * 10  # Make it a multiple of 10
+                    Values = Values[:new_size]
+                    self.TimeSteps = self.TimeSteps[:new_size]
+                    self.TimeSteps = self.TimeSteps[::10]
+                    Values = Values.reshape(-1, 10, Values.shape[1], Values.shape[2]).mean(axis=1)
+                    axis["Time"] = axis["Time"][:new_size]
+                    axis["Time"] = axis["Time"][::10]
+                    arg=1
+                    while axis["Time"][arg] - axis["Time"][0] < dT:
+                        arg += 1
+                    truncate_size = (axis["Time"].shape[0] // arg) * 10  # Make it a multiple of arg
+                    axis["Time"] = axis["Time"][:truncate_size]  # Slice to truncate
+                    self.TimeSteps = self.TimeSteps[:truncate_size]
+                    Values = Values[:truncate_size]  # Slice to truncate
+                    axis["Time"] = axis["Time"][::arg]
+                    self.TimeSteps = self.TimeSteps[::arg]
+                    Values = Values[::arg]
             else:
-                Den = File.__dict__[attr].data
-                Den = np.reshape(np.mean(Den[:, :, np.where(abs(Axis['y'])<0.5)[0]], axis=2), (Axis['x'].shape[0], Axis['y'].shape[0]))
-            if dx != 1:
-                if dx == 0:
-                    dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
-                elif np.diff(Axis['x'][np.s_[::dx]])[0] > 100e-3:
-                    print(f"Warning: dx = {dx} is too large. Setting dx = 4")
-                    dx = 4
-                Axis["x"] = Axis["x"][np.s_[::dx]]
-            if dy != 1:
-                if dy == 0:
-                    dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
-                elif np.diff(Axis['y'][np.s_[::dy]])[0] > 100e-3:
-                    print(f"Warning: dy = {dy} is too large. Setting dy = 4")
-                    dy = 4
-                Axis["y"] = Axis["y"][np.s_[::dy]]
-            if dx != 1:
-                Den = Den[np.s_[::dx, ::dy]]
-            Data = Den
-            return Data, Axis
-        elif self.Dim == 3:
-            raise ValueError("Only Electric_Field diagnostic is supported for 3D simulations")
-        
-        File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
-        if Averaged and t == 0:
-            Grid_ID = None
-        else:
-            Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
+                Values = np.squeeze(MetaData.getData())
+            if Diag == "ParticleBinning" and self.Geo == "Cyl":
+                raise ValueError(f"Cylindrical isn't done yet..")
+                if len(Values.shape)>3:
+                    Values = self.np.array(Simulation.ParticleBinning(Name, units=units, average={"z":"all"}).getData())
+                    print(f"\n\033[1;31m{Name} is 3 dimensional\033[0m\nAveraging over z")
+            # if Diag == "Fields":
+                # self.max_number = float('-inf')  # Initialize max_number to negative infinity
+                # for array in Values:
+                #     current_max = self.np.max(array)
+                #     if current_max > self.max_number:
+                #         self.max_number = current_max
+                        
+            bin_size = None
+            for axis_name in axis_names:
+                if self.Geo == "Cyl" and Diag == "Fields" and axis_name == "y":
+                    axis_data = np.array(MetaData.getAxis('r'))
+                    axis_data = np.concatenate((-axis_data[..., ::-1], axis_data), axis=-1)
+                else:
+                    axis_data = np.array(MetaData.getAxis(axis_name))
+                if len(axis_data)==0:
+                        continue
+                elif axis_name == "x":
+                    axis_data = axis_data - (self.x_spot/self.micro)
+                elif axis_name == "y":
+                    if self.Geo == "cart":
+                        axis_data = axis_data - ((self.Box['y']/self.micro)/2)
+                    elif self.Geo == "Cyl":
+                        axis_data = axis_data 
+                elif axis_name == "z":
+                    axis_data = axis_data  
+                elif axis_name == "user_function0":
+                    bin_size=(axis_data[1]-axis_data[0]) if bin_size is None else bin_size*(axis_data[1]-axis_data[0])
+                elif axis_name == "ekin":
+                    if "carbon" in Name:
+                        Z=12
+                    elif "proton" in Name:
+                        Z=1
+                    elif "electron" in Name:
+                        Z=1
+                    if Z is None:
+                        raise ValueError("Species not recognised or number of nucleons (Z) not provided")
+                    axis_data = MetaData.getAxis('ekin')/Z
+                    # for t in self.TimeSteps[1:]:
+                    #     axis_data=self.np.vstack((axis_data, self.np.array(MetaData.getAxis('ekin', timestep=t)/Z)))
+                    # if ProsData:
+                    #     Values = Values * (self.Area)
+                elif axis_name == "px":
+                    if "x-px" in Name:
+                        bin_size = axis['x'][1]-axis['x'][0]
+                    axis_data = MetaData.getAxis('px')
+                    # for t in self.TimeSteps[1:]:
+                    #     axis_data = self.np.vstack((axis_data,self.np.array(MetaData.getAxis('px', timestep=t))))
+                elif axis_name == "py":
+                    axis_data = MetaData.getAxis('py')
+                    # for t in self.TimeSteps[1:]:
+                    #     axis_data = self.np.vstack((axis_data,self.np.array(MetaData.getAxis('py', timestep=t))))
+                elif axis_name == "pz":
+                    axis_data = MetaData.getAxis('pz')
+                    # for t in self.TimeSteps[1:]:
+                    #     axis_data = self.np.vstack((axis_data,self.np.array(MetaData.getAxis('pz', timestep=t))))
+                axis[axis_name] = axis_data
+            return Values * bin_size if bin_size is not None else Values, axis
 
-        for axis in AxisNames:
-            if self.Test: print(f"Processing axis: {axis}")
-            if axis == "Time":
-                Axis['Time'] = round(float(File["SDF/Header/time"][()]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
-            elif axis == "x":
-                Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
+        elif self.Code == "EPOCH":
+            if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
+            if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
+            Axis = {axis: [] for axis in AxisNames}
+            rel_elec = False
+            if Name == "rel electron":
+                rel_elec = True
+                Name = "electron"
+            attr = Diag + "_" + Name
+            if Averaged:
+                attr += "_averaged"
+
+            if self.Test: print(f"Processing file {t:04d}.h5")
+            if self.Dim == 3 and Diag == "Electric_Field":
+                File = sh.getdata(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.sdf"), verbose=False)
+                Axis['x'] = File.Grid_Grid_mid.data[0]/ self.micro
+                
+                Axis['y'] = File.Grid_Grid_mid.data[1]/ self.micro
+                
+                Axis['Time'] = round(float(File.Header['time']) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
+                if Averaged and t == 0:
+                    Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
+                    print("Skipped averaging for the first file")
+                else:
+                    Den = File.__dict__[attr].data
+                    Den = np.reshape(np.mean(Den[:, :, np.where(abs(Axis['y'])<0.5)[0]], axis=2), (Axis['x'].shape[0], Axis['y'].shape[0]))
                 if dx != 1:
                     if dx == 0:
                         dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
@@ -329,10 +495,6 @@ class Process():
                         print(f"Warning: dx = {dx} is too large. Setting dx = 4")
                         dx = 4
                     Axis["x"] = Axis["x"][np.s_[::dx]]
-            elif axis == "y":
-                Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
-                if self.Geo == 'cyl':
-                    Axis["y"] = np.linspace(-Axis["y"].max(), Axis["y"].max(), 2*len(Axis["y"]))
                 if dy != 1:
                     if dy == 0:
                         dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
@@ -340,41 +502,78 @@ class Process():
                         print(f"Warning: dy = {dy} is too large. Setting dy = 4")
                         dy = 4
                     Axis["y"] = Axis["y"][np.s_[::dy]]
-            elif Grid_ID is not None:
-                if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
-                else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
-                Axis[axis] = np.reshape(Axis[axis], np.max(Axis[axis].shape))
+                if dx != 1:
+                    Den = Den[np.s_[::dx, ::dy]]
+                Data = Den
+                return Data, Axis
+            elif self.Dim == 3:
+                raise ValueError("Only Electric_Field diagnostic is supported for 3D simulations")
+            
+            File = h5py.File(os.path.join(self.SimulationPath, f"{'' if not self.FilePrefix else self.FilePrefix}{t:04d}.h5"), 'r')
+            if Averaged and t == 0:
+                Grid_ID = None
+            else:
+                Grid_ID = File[f"SDF/{attr}"].attrs.get("grid_id")
 
-        if Averaged and t == 0:
-            Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
-            if self.Log: print("Skipped averaging for the first file")
-        else:
-            Den = File[f"SDF/{attr}"][:]
-            if dx != 1:
-                Den = Den[np.s_[::dx, ::dy]]
-            if rel_elec:
-                RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
-                Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
-                Den = Den / Gamma
-            Data = Den
+            for axis in AxisNames:
+                if self.Test: print(f"Processing axis: {axis}")
+                if axis == "Time":
+                    Axis['Time'] = round(float(File["SDF/Header/time"][()]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
+                elif axis == "x":
+                    Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
+                    if dx != 1:
+                        if dx == 0:
+                            dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
+                        elif np.diff(Axis['x'][np.s_[::dx]])[0] > 100e-3:
+                            print(f"Warning: dx = {dx} is too large. Setting dx = 4")
+                            dx = 4
+                        Axis["x"] = Axis["x"][np.s_[::dx]]
+                elif axis == "y":
+                    Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
+                    if self.Geo == 'cyl':
+                        Axis["y"] = np.linspace(-Axis["y"].max(), Axis["y"].max(), 2*len(Axis["y"]))
+                    if dy != 1:
+                        if dy == 0:
+                            dy = 4 if np.diff(Axis['y'][np.s_[::4]])[0] < 100e-3 else 2
+                        elif np.diff(Axis['y'][np.s_[::dy]])[0] > 100e-3:
+                            print(f"Warning: dy = {dy} is too large. Setting dy = 4")
+                            dy = 4
+                        Axis["y"] = Axis["y"][np.s_[::dy]]
+                elif Grid_ID is not None:
+                    if len(AxisNames) == 2: Axis[axis] = File[f"SDF/{Grid_ID}"][:]
+                    else: Axis[axis] = File[f"SDF/{Grid_ID}/axis{AxisNames.index(axis)}"][:]
+                    Axis[axis] = np.reshape(Axis[axis], np.max(Axis[axis].shape))
 
-        if Diag == "Derived_Number_Density":
-            Data = Data / self.den_crit  # Convert to normalized number density
-        elif Diag == "Derived_Average_Particle_Energy":
-            Data = Data / self.MeV_to_J  # Convert to MeV
+            if Averaged and t == 0:
+                Data = np.zeros((Axis["x"].shape[0], Axis["y"].shape[0]))
+                if self.Log: print("Skipped averaging for the first file")
+            else:
+                Den = File[f"SDF/{attr}"][:]
+                if dx != 1:
+                    Den = Den[np.s_[::dx, ::dy]]
+                if rel_elec:
+                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
+                    Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
+                    Den = Den / Gamma
+                Data = Den
 
-        if "ekin" in AxisNames:
-            if "carbon" in Name:
-                Z=12
-            elif "proton" in Name:
-                Z=1
-            elif "electron" in Name:
-                Z=1
-            if Z is None:
-                raise ValueError("Species not recognised or number of nucleons (Z) not provided")
-            Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
-        
-        File.close()
+            if Diag == "Derived_Number_Density":
+                Data = Data / self.den_crit  # Convert to normalized number density
+            elif Diag == "Derived_Average_Particle_Energy":
+                Data = Data / self.MeV_to_J  # Convert to MeV
+
+            if "ekin" in AxisNames:
+                if "carbon" in Name:
+                    Z=12
+                elif "proton" in Name:
+                    Z=1
+                elif "electron" in Name:
+                    Z=1
+                if Z is None:
+                    raise ValueError("Species not recognised or number of nucleons (Z) not provided")
+                Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
+            
+            File.close()
         return Data, Axis
 
     def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, Start=0, End=None, MultiPros=False, Iter=None):
@@ -432,20 +631,31 @@ class Process():
             if Species and not isinstance(Species, list):
                 Species = [Species]
                 for type in Species:
-                    if not EkBar:
+                    if self.Code == "SMILEI":
                         if type == "rel electron":
-                            self.DiagCheck("Derived_Average_Particle_Energy_electron")
-                            self.DiagCheck("Derived_Number_Density_electron")
-                        else: self.DiagCheck(f"Derived_Number_Density_{type}")
-                    else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
+                            self.DiagCheck("electron density", SmileiName="ParticleBinning")
+                            self.DiagCheck("electron energy density", SmileiName="ParticleBinning")
+                        else:
+                            self.DiagCheck(f"{type} density", SmileiName="ParticleBinning")
+                    elif self.Code == "EPOCH":
+                        if not EkBar:
+                            if type == "rel electron":
+                                self.DiagCheck("Derived_Average_Particle_Energy_electron")
+                                self.DiagCheck("Derived_Number_Density_electron")
+                            else: self.DiagCheck(f"Derived_Number_Density_{type}")
+                        else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if Field:
-                if 'E' in Field: 
+                if self.Code == "SMILEI":
+                    self.DiagCheck(f"{Field}", SmileiName="Fields")
+                elif 'E' in Field: 
                     self.DiagCheck(f"Electric_Field_{Field}")
                 elif 'B' in Field:
                     self.DiagCheck(f"Magnetic_Field_{Field}")
                 else: raise ValueError("Field must start with 'E' or 'B'")
             if FieldAvg:
-                if 'E' in FieldAvg:
+                if self.Code == "SMILEI":
+                    self.DiagCheck(f"{Field}", SmileiName="Fields")
+                elif 'E' in FieldAvg:
                     self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
                 elif 'B' in FieldAvg:
                     self.DiagCheck(f"Magnetic_Field_{FieldAvg}_averaged")
@@ -478,7 +688,7 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'DensityPlot', Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
+            tasks = [(i, self, "DensityPlot", Species, EkBar, Field, FieldAvg, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
             done = 0
             last_idx = -1
             if DataOnly:
@@ -528,24 +738,33 @@ class Process():
                 if FieldAvg: to_include.append(FieldAvg)
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
                 if Field:
-                    if 'E' in Field:
-                        F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                    elif 'B' in Field:
-                        F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    if self.Code == "SMILEI":
+                        F_data, F_axis = self.GetData("Fields", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    elif self.Code == "EPOCH":
+                        if 'E' in Field:
+                            F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                        elif 'B' in Field:
+                            F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
                     to_return[Field]['data'] = np.array(F_data)
                     for k, v in F_axis.items():
                         to_return[Field]['axis'][k] = np.array(v)
                 elif FieldAvg:
-                    if 'E' in FieldAvg:
-                        F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                    elif 'B' in FieldAvg:
-                        F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    if self.Code == "SMILEI":
+                        F_data, F_axis = self.GetData("Fields", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    elif self.Code == "EPOCH":
+                        if 'E' in FieldAvg:
+                            F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                        elif 'B' in FieldAvg:
+                            F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
                     to_return[FieldAvg]['data'] = np.array(F_data)
                     for k, v in F_axis.items():
                         to_return[FieldAvg]['axis'][k] = np.array(v)
                 if Species:
                     for type in Species:
-                        den_to_plot, axis = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
+                        if self.Code == "SMILEI":
+                            den_to_plot, axis = self.GetData("ParticleBinning", type, self.space_axis, Iter, dx=dx, dy=dy)
+                        elif self.Code == "EPOCH":
+                            den_to_plot, axis = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
                         to_return[type]['data'] = np.array(den_to_plot)
                         for k, v in axis.items():                 # axis[type] is a dict
                             to_return[type]['axis'][k] = np.array(v)
@@ -555,19 +774,27 @@ class Process():
             den_to_plot={}
             axis={}
             if Field:
-                if 'E' in Field:
-                    F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                elif 'B' in Field:
-                    F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                if self.Code == "SMILEI":
+                        F_data, F_axis = self.GetData("Fields", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                elif self.Code == "EPOCH":
+                    if 'E' in Field:
+                        F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                    elif 'B' in Field:
+                        F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
             elif FieldAvg:
-                if 'E' in FieldAvg:
-                    F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                elif 'B' in FieldAvg:
-                    F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                if self.Code == "SMILEI":
+                        F_data, F_axis = self.GetData("Fields", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                elif self.Code == "EPOCH":
+                    if 'E' in FieldAvg:
+                        F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                    elif 'B' in FieldAvg:
+                        F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
             if Species:
                 for type in Species:
-                    den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
-
+                    if self.Code == "SMILEI":
+                        den_to_plot[type], axis[type] = self.GetData("ParticleBinning", type, self.space_axis, Iter, dx=dx, dy=dy)
+                    elif self.Code == "EPOCH":
+                        den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density" if not EkBar else "Derived_Average_Particle_Energy", type, self.space_axis, Iter, dx=dx, dy=dy)
             if self.Dim > 1:
                 if Species:
                     for type in Species:
