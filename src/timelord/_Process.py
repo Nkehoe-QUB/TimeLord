@@ -630,8 +630,9 @@ class Process():
                 raise ValueError("No species or field were provided")
             if Intensity and not Field:
                 raise ValueError("No field were provided")
-            if Species and not isinstance(Species, list):
-                Species = [Species]
+            if Species:
+                if not isinstance(Species, list):
+                    Species = [Species]
                 for type in Species:
                     if self.Code == "SMILEI":
                         if type == "rel electron":
@@ -662,11 +663,9 @@ class Process():
                 elif 'B' in FieldAvg:
                     self.DiagCheck(f"Magnetic_Field_{FieldAvg}_averaged")
                 else: raise ValueError("FieldAvg must start with 'E' or 'B'")
-            if Colours is not None and not isinstance(Colours, list):
-                if not isinstance(Colours, str):
-                    raise ValueError("Colours must be a list of strings")
-                elif Colours == "jet":
-                    Colours = None
+            if Colours is not None:
+                if not isinstance(Colours, list):
+                    Colours = [Colours]
                 elif len(Colours) != len(Species):
                     print("Number of colours must match number of species\nSetting colours to 'jet'")
                     Colours = None
@@ -818,10 +817,10 @@ class Process():
                             CBMin = 1e0
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
                         if not EkBar:
-                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]),
+                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]) if hasattr(cmaps, Colours[Species.index(type)]) else Colours[Species.index(type)],
                                               norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax), zorder=1+Species.index(type))
                         else:
-                                cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]),
+                                cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]) if hasattr(cmaps, Colours[Species.index(type)]) else Colours[Species.index(type)],
                                                   norm=cm.Normalize(vmin=0.0 if CBMin is None else CBMin, vmax=np.nanmax(den_to_plot[type].T) if CBMax is None else CBMax), zorder=1+Species.index(type))
                         if (Colours is not None) and (len(Colours) > 1) and (not Field or not FieldAvg):
                             cbar=fig.colorbar(cax, aspect=50)
