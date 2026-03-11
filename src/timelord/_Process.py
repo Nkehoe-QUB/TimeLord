@@ -779,6 +779,7 @@ class Process():
                         F_data, F_axis = self.GetData("Fields", Field, self.space_axis, Iter, dx=dx, dy=dy)
                 elif self.Code == "EPOCH":
                     if 'E' in Field:
+                        F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
                         if Intensity:
                             tmpField = None
                             if self.DiagCheck(f"Electric_Field_Ey"):
@@ -793,7 +794,6 @@ class Process():
                             tmpField = np.sqrt(tmpField)
                             F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
 
-                        F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
                     elif 'B' in Field:
                         F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
             elif FieldAvg:
@@ -834,9 +834,9 @@ class Process():
                     alpha = 1 - (1 - np.abs(np.linspace(-1, 1, 256)) )**2   # Creates a peak at center
                     base[:, -1] = alpha
                     transparent_cmap = cm.ListedColormap(base)
-                    F = Field if Field else FieldAvg
+                    F = 'Intensity' if Intensity else Field if Field else FieldAvg
                     FUnit = '$W/cm^2$' if Intensity else 'V/m' if 'E' in F else 'T'
-                    cax1=ax.pcolormesh(F_axis['x'], F_axis['y'], F_data.T, cmap=cmaps.lajolla if Intensity else transparent_cmap, norm=cm.LogNorm(vmin=1e19 if FMax is None else FMax * 1e-3, vmax=1e21 if FMax is None else FMax, zorder=len(Species)+1) if Intensity else cm.CenteredNorm(halfrange=np.nanmax(F_data.T) if FMax is None else FMax), zorder=len(Species)+1)
+                    cax1=ax.pcolormesh(F_axis['x'], F_axis['y'], F_data.T, cmap=cmaps.lajolla if Intensity else transparent_cmap, norm=cm.LogNorm(vmin=1e19 if FMax is None else FMax * 1e-3, vmax=1e21 if FMax is None else FMax) if Intensity else cm.CenteredNorm(halfrange=np.nanmax(F_data.T) if FMax is None else FMax), zorder=len(Species)+1)
                     cbar1 = fig.colorbar(cax1, aspect=50)
                     cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 ax.set(xlim=(XMin if XMin is not None else None, XMax if XMax is not None else None),
