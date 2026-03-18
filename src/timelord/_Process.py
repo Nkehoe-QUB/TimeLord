@@ -463,6 +463,16 @@ class Process():
             return Values * bin_size if bin_size is not None else Values, axis
 
         elif self.Code == "EPOCH":
+            if "carbon" in Name:
+                    Z=12
+            elif "proton" in Name:
+                Z=1
+            elif "electron" in Name:
+                Z=1
+            if Z is None:
+                if self. Log: 
+                    if t ==0: print("Species not recognised or number of nucleons (Z) not provided. Setting to 1")
+                Z = 1
             if "Time" not in AxisNames: AxisNames.append("Time")  # Add time axis
             if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
             Axis = {axis: [] for axis in AxisNames}
@@ -560,17 +570,9 @@ class Process():
             if Diag == "Derived_Number_Density":
                 Data = Data / self.den_crit  # Convert to normalized number density
             elif Diag == "Derived_Average_Particle_Energy":
-                Data = Data / self.MeV_to_J  # Convert to MeV
+                Data = Data / (self.MeV_to_J * Z)  # Convert to MeV
 
             if "ekin" in AxisNames:
-                if "carbon" in Name:
-                    Z=12
-                elif "proton" in Name:
-                    Z=1
-                elif "electron" in Name:
-                    Z=1
-                if Z is None:
-                    raise ValueError("Species not recognised or number of nucleons (Z) not provided")
                 Axis['ekin'] = Axis['ekin'] / self.MeV_to_J / Z
             
             File.close()
