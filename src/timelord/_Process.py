@@ -530,7 +530,8 @@ class Process():
                 if axis == "Time":
                     Axis['Time'] = round(float(File["SDF/Header/time"][()]) / self.femto - self.t0, 2)  # Convert time to femtoseconds and add t0
                 elif axis == "x":
-                    Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
+                    try: Axis["x"] = File["SDF/Grid_Grid_mid/axis0"][:]/ self.micro
+                    except: Axis["x"] = File["SDF/Grid_Grid_mid"][:][0]/ self.micro
                     if dx != 1:
                         if dx == 0:
                             dx = 4 if np.diff(Axis['x'][np.s_[::4]])[0] < 100e-3 else 2
@@ -539,7 +540,8 @@ class Process():
                             dx = 4
                         Axis["x"] = Axis["x"][np.s_[::dx]]
                 elif axis == "y":
-                    Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
+                    try: Axis["y"] = File["SDF/Grid_Grid_mid/axis1"][:]/ self.micro
+                    except: Axis["y"] = File["SDF/Grid_Grid_mid"][:][1]/ self.micro
                     if self.Geo == 'cyl':
                         Axis["y"] = np.linspace(-Axis["y"].max(), Axis["y"].max(), 2*len(Axis["y"]))
                     if dy != 1:
