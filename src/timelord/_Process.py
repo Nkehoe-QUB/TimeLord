@@ -477,9 +477,9 @@ class Process():
             if self.Test: print(f"Getting data for {Diag} - {Name} with axes {AxisNames} and {self.LenSim} files")
             Axis = {axis: [] for axis in AxisNames}
             rel_elec = False
-            if Name == "rel electron":
+            if "rel" in Name:
                 rel_elec = True
-                Name = "electron"
+                Name = Name.split(' ')[1]
             attr = Diag + "_" + Name
             if Averaged:
                 attr += "_averaged"
@@ -564,7 +564,7 @@ class Process():
                 if dx != 1:
                     Den = Den[np.s_[::dx, ::dy]]
                 if rel_elec:
-                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_electron"][:][np.s_[::dx, ::dy]]
+                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_{Name}"][:][np.s_[::dx, ::dy]]
                     Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                     Den = Den / Gamma
                 Data = Den
@@ -639,16 +639,18 @@ class Process():
                     Species = [Species]
                 for type in Species:
                     if self.Code == "SMILEI":
-                        if type == "rel electron":
-                            self.DiagCheck("electron density", SmileiName="ParticleBinning")
-                            self.DiagCheck("electron energy density", SmileiName="ParticleBinning")
+                        if "rel" in type:
+                            electron = type.split(' ')[1]
+                            self.DiagCheck(f"{electron} density", SmileiName="ParticleBinning")
+                            self.DiagCheck(f"{electron} energy density", SmileiName="ParticleBinning")
                         else:
                             self.DiagCheck(f"{type} density", SmileiName="ParticleBinning")
                     elif self.Code == "EPOCH":
                         if not EkBar:
-                            if type == "rel electron":
-                                self.DiagCheck("Derived_Average_Particle_Energy_electron")
-                                self.DiagCheck("Derived_Number_Density_electron")
+                            if "rel" in type:
+                                electron = type.split(' ')[1]
+                                self.DiagCheck(f"Derived_Average_Particle_Energy_{electron}")
+                                self.DiagCheck(f"Derived_Number_Density_{electron}")
                             else: self.DiagCheck(f"Derived_Number_Density_{type}")
                         else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if Field:
@@ -673,7 +675,6 @@ class Process():
                 elif len(Colours) != len(Species):
                     print("Number of colours must match number of species\nSetting colours to 'jet'")
                     Colours = None
-                else: Colours = [Colours]
             if End is None:
                 End = self.LenSim
             if self.Log:
@@ -817,7 +818,7 @@ class Process():
             if self.Dim > 1:
                 if Species:
                     for type in Species:
-                        if type == 'rel electron' and not EkBar and CBMin is None:
+                        if "rel" in type and not EkBar and CBMin is None:
                             CBMin = 1e0
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
                         if not EkBar:
