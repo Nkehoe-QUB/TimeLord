@@ -141,12 +141,15 @@ class Process():
                 except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
                 try: self.Dim = len(tmp.Electric_Field_Ey.dims)
                 except: self.Dim = 2
-        
-            if Prefix:
-                with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
-                    text = f.readlines()
-                    if len(text[0].replace('\n','').split('.')[0]) > 4:
-                        self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
+            
+            if not Prefix:
+                visitFiles = [os.path.splitext(os.path.basename(i))[0] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
+                if len(visitFiles) == 0:
+                    Prefix = None
+                elif len(visitFiles) > 1:
+                    raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
+                else:
+                    Prefix = visitFiles[0]
             LenSDF = len([
                 int(os.path.splitext(os.path.basename(i))[0])
                 for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
@@ -155,19 +158,34 @@ class Process():
                 int(os.path.splitext(os.path.basename(i))[0])
                 for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
             ])
-            if LenSDF == 0:
-                if LenHDF == 0:
-                    raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
-                ConvData = False
-                self.LenSim = LenHDF
-                Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+
+            if Prefix:
+                with open(os.path.join(self.SimulationPath, f'{Prefix}.visit'), 'r') as f:
+                    text = f.readlines()
+                    if len(text[0].replace('\n','').split('.')[0]) > 4:
+                        self.FilePrefix = text[0].replace('\n','').split('.')[0][:-4]
+                    self.LenSim = len(text)
+                    if LenSDF == 0:
+                        if LenHDF == 0:
+                            raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+                        ConvData = False
+                        Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+                    else:
+                        ConvData = True
             else:
-                ConvData = True
-                if self.Dim > 2:
-                    if self.workers < 5:
-                        self.workers = 1
-                        Message += f"\n\033[1;33m3D Simulations only use 1 worker.\033[0m\n"
-                self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
+                if LenSDF == 0:
+                    if LenHDF == 0:
+                        raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+                    ConvData = False
+                    self.LenSim = LenHDF
+                    Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
+                else:
+                    ConvData = True
+                    if self.Dim > 2:
+                        if self.workers < 5:
+                            self.workers = 1
+                            Message += f"\n\033[1;33m3D Simulations only use 1 worker.\033[0m\n"
+                    self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
             if ConvData:
                 if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
 
