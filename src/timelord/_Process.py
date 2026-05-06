@@ -130,26 +130,15 @@ class Process():
             if self.Geo not in ['cart', 'cyl']:
                 raise ValueError("\033[1;31mGeo must be 'cart' or 'cyl'\033[0m")
             visit_files = [i.split('/')[-1] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
-            if len(visit_files) > 1 and Prefix is None: #f'0000.h5' not in os.listdir(self.SimulationPath) and f'0000.sdf' not in os.listdir(self.SimulationPath):
+            if len(visit_files) > 1 and Prefix is None: 
                 raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
-            if f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5' in os.listdir(self.SimulationPath):
-                with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
-                    try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
-                    except: self.Dim = 2
-            else:
-                try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
-                except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
-                try: self.Dim = len(tmp.Electric_Field_Ey.dims)
-                except: self.Dim = 2
-            
             if not Prefix:
-                visitFiles = [os.path.splitext(os.path.basename(i))[0] for i in glob.glob(f'{self.SimulationPath}/*.visit')]
-                if len(visitFiles) == 0:
+                if len(visit_files) == 0:
                     Prefix = None
-                elif len(visitFiles) > 1:
+                elif len(visit_files) > 1:
                     raise KeyError("\033[1;31mMultiple visit files found. Please provide the Prefix argument to specify which simulation to process.\033[0m")
                 else:
-                    Prefix = visitFiles[0]
+                    Prefix = visit_files[0].split('.visit')[0]
             LenSDF = len([
                 int(os.path.splitext(os.path.basename(i))[0])
                 for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
@@ -168,18 +157,32 @@ class Process():
                     if LenSDF == 0:
                         if LenHDF == 0:
                             raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+                        with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
+                            try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+                            except: self.Dim = 2
                         ConvData = False
                         Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
                     else:
+                        try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+                        except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
+                        try: self.Dim = len(tmp.Electric_Field_Ey.dims)
+                        except: self.Dim = 2
                         ConvData = True
             else:
                 if LenSDF == 0:
                     if LenHDF == 0:
                         raise ValueError(f"\033[1;31mSimulation \033[1;33m{self.SimulationPath}\033[0m does not exist\033[0m")
+                    with h5py.File(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.h5'), 'r') as file:
+                        try: self.Dim = len(file["SDF/Electric_Field_Ey"].attrs.get("dims"))
+                        except: self.Dim = 2
                     ConvData = False
                     self.LenSim = LenHDF
                     Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
                 else:
+                    try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
+                    except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
+                    try: self.Dim = len(tmp.Electric_Field_Ey.dims)
+                    except: self.Dim = 2
                     ConvData = True
                     if self.Dim > 2:
                         if self.workers < 5:
