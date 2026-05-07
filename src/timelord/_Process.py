@@ -164,9 +164,12 @@ class Process():
                         Message += f"\n\033[1;33mHDF5 files already exist. Skipping conversion.\033[0m\n"
                     else:
                         try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0000.sdf'), verbose=False)
-                        except: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
-                        try: self.Dim = len(tmp.Electric_Field_Ey.dims)
-                        except: self.Dim = 2
+                        except: 
+                            try: tmp = sh.getdata(os.path.join(self.SimulationPath, f'{"" if not self.FilePrefix else self.FilePrefix}0001.sdf'), verbose=False)
+                            except: tmp = None
+                        if tmp is not None:
+                            self.Dim = len(tmp.Electric_Field_Ey.dims)
+                        else: self.Dim = 2
                         ConvData = True
             else:
                 if LenSDF == 0:
