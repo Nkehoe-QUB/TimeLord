@@ -585,10 +585,15 @@ class Process():
                 if self.Log: print("Skipped averaging for the first file")
             else:
                 Den = File[f"SDF/{attr}"][:]
-                if dx != 1:
-                    Den = Den[np.s_[::dx, ::dy]] if self.Dim == 2 else Den[np.s_[::dx]]
+                if len(Den.shape) == 2:
+                    Den = Den[np.s_[::dx, ::dy]]
+                elif len(Den.shape) == 1:
+                    Den = Den[np.s_[::dx]]
                 if rel_elec:
-                    RelDen = File[f"SDF/Derived_Average_Particle_Energy_{Name}"][:][np.s_[::dx, ::dy]] if self.Dim == 2 else File[f"SDF/Derived_Average_Particle_Energy_{Name}"][:][np.s_[::dx]]
+                    if len(Den.shape) == 2:
+                        RelDen = File[f"SDF/Derived_Average_Particle_Energy_{Name}"][:][np.s_[::dx, ::dy]]
+                    elif len(Den.shape) == 1:
+                        RelDen = File[f"SDF/Derived_Average_Particle_Energy_{Name}"][:][np.s_[::dx]]
                     Gamma = 1 + (RelDen / self.MeV_to_J / 0.511)  # Convert to relativistic gamma factor
                     Den = Den / Gamma
                 Data = Den
