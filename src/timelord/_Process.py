@@ -609,7 +609,7 @@ class Process():
             File.close()
         return Data, Axis
 
-    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, Intensity=False, FMax=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, Start=0, End=None, MultiPros=False, Iter=None):
+    def DensityPlot(self, Species=[], EkBar=False, Field=False, FieldAvg=False, FMax=None, FMin=None, Colours=None, XMin=None, XMax=None, YMin=None, YMax=None, CBMin=None, CBMax=None, dx=0, dy=0, File=None, DataOnly=False, Start=0, End=None, MultiPros=False, Iter=None):
         """Plot density or average energy density for specified species and/or electric field.
         Parameters:
         -----------
@@ -661,8 +661,6 @@ class Process():
         if not MultiPros:
             if not Species and (Field and FieldAvg) is None:
                 raise ValueError("No species or field were provided")
-            if Intensity and not Field:
-                raise ValueError("No field were provided")
             if Species:
                 if not isinstance(Species, list):
                     Species = [Species]
@@ -689,6 +687,8 @@ class Process():
                     self.DiagCheck(f"Electric_Field_{Field}")
                 elif 'B' in Field:
                     self.DiagCheck(f"Magnetic_Field_{Field}")
+                elif Field == 'Intensity':
+                    self.DiagCheck(f"Electric_Field_Ey")
                 else: raise ValueError("Field must start with 'E' or 'B'")
             if FieldAvg:
                 if self.Code == "SMILEI":
@@ -723,7 +723,7 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, "DensityPlot", Species, EkBar, Field, FieldAvg, Intensity, FMax, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
+            tasks = [(i, self, "DensityPlot", Species, EkBar, Field, FieldAvg, FMax, FMin, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
             done = 0
             last_idx = -1
             if DataOnly:
@@ -814,19 +814,19 @@ class Process():
                 elif self.Code == "EPOCH":
                     if 'E' in Field:
                         F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                        if Intensity:
-                            tmpField = None
-                            if self.DiagCheck(f"Electric_Field_Ey"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ey", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2
-                            if self.DiagCheck(f"Electric_Field_Ex"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ex", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
-                            if self.DiagCheck(f"Electric_Field_Ez"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ez", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
-                            tmpField = np.sqrt(tmpField)
-                            F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
+                    elif Field == 'Intensity':
+                        tmpField = None
+                        if self.DiagCheck(f"Electric_Field_Ey"):
+                            tmp, F_axis = self.GetData("Electric_Field", "Ey", self.space_axis, Iter, dx=dx, dy=dy)
+                            tmpField = tmp**2
+                        if self.DiagCheck(f"Electric_Field_Ex"):
+                            tmp, F_axis = self.GetData("Electric_Field", "Ex", self.space_axis, Iter, dx=dx, dy=dy)
+                            tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                        if self.DiagCheck(f"Electric_Field_Ez"):
+                            tmp, F_axis = self.GetData("Electric_Field", "Ez", self.space_axis, Iter, dx=dx, dy=dy)
+                            tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                        # tmpField = tmpField
+                        F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
 
                     elif 'B' in Field:
                         F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
@@ -868,9 +868,9 @@ class Process():
                     alpha = 1 - (1 - np.abs(np.linspace(-1, 1, 256)) )**2   # Creates a peak at center
                     base[:, -1] = alpha
                     transparent_cmap = cm.ListedColormap(base)
-                    F = 'Intensity' if Intensity else Field if Field else FieldAvg
-                    FUnit = '$W/cm^2$' if Intensity else 'V/m' if 'E' in F else 'T'
-                    cax1=ax.pcolormesh(F_axis['x'], F_axis['y'], F_data.T, cmap=cmaps.lajolla if Intensity else transparent_cmap, norm=cm.LogNorm(vmin=1e19 if FMax is None else FMax * 1e-3, vmax=1e21 if FMax is None else FMax) if Intensity else cm.CenteredNorm(halfrange=np.nanmax(F_data.T) if FMax is None else FMax), zorder=len(Species)+1)
+                    F = Field if Field else FieldAvg
+                    FUnit = 'V/m' if 'E' in F else 'T' if 'B' in F else '$W/cm^2$'
+                    cax1=ax.pcolormesh(F_axis['x'], F_axis['y'], F_data.T, cmap=cmaps.lajolla if Field == 'Intensity' else transparent_cmap, norm=cm.LogNorm(vmin=FMin if FMin is not None else np.nanmax(F_data)*1e-3 if np.nanmax(F_data) > 1e10 else 1e5, vmax=FMax if FMax is not None else np.nanmax(F_data) if np.nanmax(F_data) > 1e10 else 1e10) if Field == 'Intensity' else cm.CenteredNorm(halfrange=np.nanmax(F_data.T) if FMax is None else FMax), zorder=len(Species)+1)
                     cbar1 = fig.colorbar(cax1, aspect=50)
                     cbar1.set_label(f"{Field if Field else FieldAvg} [{FUnit}]")
                 ax.set(xlim=(XMin if XMin is not None else None, XMax if XMax is not None else None),
@@ -881,11 +881,11 @@ class Process():
                     FUnit = 'V/m' if (['E' in E[i] for i in range(len(E))]) else 'T'
                     if not Species:
                         ax.plot(F_axis['x'], F_data, label=Field if Field else FieldAvg)
-                        ax.set(ylim=(-np.nanmax(F_data) if FMax is None else -FMax, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax.set(ylim=(-np.nanmax(F_data) if FMin is None else FMin, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                     else:
                         ax2 = ax.twinx()
                         ax2.plot(F_axis['x'], F_data, 'r', label=Field if Field else FieldAvg)
-                        ax2.set(ylim=(-np.nanmax(F_data) if FMax is None else -FMax, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
+                        ax2.set(ylim=(-np.nanmax(F_data) if FMin is None else FMin, np.nanmax(F_data) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{FUnit}]")
                 if Species:
                     for type in Species:
                         ax.plot(axis[type]['x'], den_to_plot[type], label=f"{type}")
