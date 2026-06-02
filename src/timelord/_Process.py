@@ -194,12 +194,18 @@ class Process():
                     self.LenSim = LenSDF if LenHDF==0 else LenSDF + LenHDF if LenSDF != LenHDF else LenSDF
             if ConvData:
                 if self.Log: print(f"\nConverting SDF files to HDF5 format. {'Not d' if not DelData else 'D'}eleting original SDF files. This may take a while...")
+                max_file_size = np.max([os.path.getsize(i) for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')])
+                if self.workers * max_file_size > AvailMem:
+                    tmp_workers = int((AvailMem / max_file_size) * 0.8)  # Use only 80% of available memory
+                    if self.Log: print(f"\n\033[1;33mReducing workers to {tmp_workers} to avoid memory issues during conversion.\033[0m\n")
+                else:
+                    tmp_workers = self.workers
 
                 tasks = [(i, self.SimulationPath, DelData, bool(self.Test), self.FilePrefix) for i in range(self.LenSim)]
                 total_tasks = self.LenSim
                 done = 0
                 last_idx = -1
-                with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                with ProcessPoolExecutor(max_workers=tmp_workers) as ex:
                     futs = [ex.submit(convert_one, t) for t in tasks]
                     for fut in as_completed(futs):
                         try:
