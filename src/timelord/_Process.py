@@ -784,6 +784,19 @@ class Process():
                     elif self.Code == "EPOCH":
                         if 'E' in Field:
                             F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
+                        elif Field == 'Intensity':
+                            tmpField = None
+                            if self.DiagCheck(f"Electric_Field_Ey"):
+                                tmp, F_axis = self.GetData("Electric_Field", "Ey", self.space_axis, Iter, dx=dx, dy=dy)
+                                tmpField = tmp**2
+                            if self.DiagCheck(f"Electric_Field_Ex"):
+                                tmp, F_axis = self.GetData("Electric_Field", "Ex", self.space_axis, Iter, dx=dx, dy=dy)
+                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                            if self.DiagCheck(f"Electric_Field_Ez"):
+                                tmp, F_axis = self.GetData("Electric_Field", "Ez", self.space_axis, Iter, dx=dx, dy=dy)
+                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                            # tmpField = tmpField
+                            F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
                         elif 'B' in Field:
                             F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
                     to_return[Field]['data'] = np.array(F_data)
