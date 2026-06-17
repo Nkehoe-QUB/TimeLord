@@ -733,7 +733,7 @@ class Process():
             done = 0
             last_idx = -1
             if DataOnly:
-                to_include = Species if Species else []
+                to_include = Species.copy() if Species else []
                 if Field: to_include.append(Field)
                 if FieldAvg: to_include.append(FieldAvg)
                 to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in to_include}
@@ -774,7 +774,7 @@ class Process():
 
         elif MultiPros:
             if DataOnly:
-                to_include = Species if Species else []
+                to_include = Species.copy() if Species else []
                 if Field: to_include.append(Field)
                 if FieldAvg: to_include.append(FieldAvg)
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
@@ -802,7 +802,7 @@ class Process():
                     to_return[Field]['data'] = np.array(F_data)
                     for k, v in F_axis.items():
                         to_return[Field]['axis'][k] = np.array(v)
-                elif FieldAvg:
+                if FieldAvg:
                     if self.Code == "SMILEI":
                         F_data, F_axis = self.GetData("Fields", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
                     elif self.Code == "EPOCH":
