@@ -687,23 +687,45 @@ class Process():
                             else: self.DiagCheck(f"Derived_Number_Density_{type}")
                         else: self.DiagCheck(f"Derived_Average_Particle_Energy_{type}")
             if Field:
-                if self.Code == "SMILEI":
-                    self.DiagCheck(f"{Field}", SmileiName="Fields")
-                elif 'E' in Field: 
-                    self.DiagCheck(f"Electric_Field_{Field}")
-                elif 'B' in Field:
-                    self.DiagCheck(f"Magnetic_Field_{Field}")
-                elif Field == 'Intensity':
-                    self.DiagCheck(f"Electric_Field_Ey")
-                else: raise ValueError("Field must start with 'E' or 'B'")
+                if not isinstance(Field, list):
+                    if self.Code == "SMILEI":
+                        self.DiagCheck(f"{Field}", SmileiName="Fields")
+                    elif 'E' in Field: 
+                        self.DiagCheck(f"Electric_Field_{Field}")
+                    elif 'B' in Field:
+                        self.DiagCheck(f"Magnetic_Field_{Field}")
+                    elif Field == 'Intensity':
+                        self.DiagCheck(f"Electric_Field_Ey")
+                    else: raise ValueError(f"{Field} must start with 'E' or 'B'")
+                else:
+                    for F in Field:
+                        if self.Code == "SMILEI":
+                            self.DiagCheck(f"{F}", SmileiName="Fields")
+                        elif 'E' in F: 
+                            self.DiagCheck(f"Electric_Field_{F}")
+                        elif 'B' in F:
+                            self.DiagCheck(f"Magnetic_Field_{F}")
+                        elif F == 'Intensity':
+                            self.DiagCheck(f"Electric_Field_Ey")
+                        else: raise ValueError(f"{F} must start with 'E' or 'B'")
             if FieldAvg:
-                if self.Code == "SMILEI":
-                    self.DiagCheck(f"{Field}", SmileiName="Fields")
-                elif 'E' in FieldAvg:
-                    self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
-                elif 'B' in FieldAvg:
-                    self.DiagCheck(f"Magnetic_Field_{FieldAvg}_averaged")
-                else: raise ValueError("FieldAvg must start with 'E' or 'B'")
+                if not isinstance(FieldAvg, list):
+                    if self.Code == "SMILEI":
+                        self.DiagCheck(f"{Field}", SmileiName="Fields")
+                    elif 'E' in FieldAvg: 
+                        self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
+                    elif 'B' in FieldAvg:
+                        self.DiagCheck(f"Magnetic_Field_{FieldAvg}_averaged")
+                    else: raise ValueError(f"Avg. {FieldAvg} must start with 'E' or 'B'")
+                else:
+                    for F in FieldAvg:
+                        if self.Code == "SMILEI":
+                            self.DiagCheck(f"{F}", SmileiName="Fields")
+                        elif 'E' in F: 
+                            self.DiagCheck(f"Electric_Field_{F}_averaged")
+                        elif 'B' in F:
+                            self.DiagCheck(f"Magnetic_Field_{F}_averaged")
+                        else: raise ValueError(f"Avg. {F} must start with 'E' or 'B'")
             if Colours is not None:
                 if not isinstance(Colours, list):
                     Colours = [Colours]
@@ -729,14 +751,20 @@ class Process():
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
+            if DataOnly:
+                if Field and not isinstance(Field, list):
+                    Field = [Field]
+                if FieldAvg and not isinstance(FieldAvg, list):
+                    FieldAvg = [FieldAvg]
+                to_include = Species.copy() if Species else []
+                if Field:
+                    for F in Field: to_include.append(F)
+                if FieldAvg:
+                    for F in FieldAvg: to_include.append(f"{F}_avg")
+                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in to_include}
             tasks = [(i, self, "DensityPlot", Species, EkBar, Field, FieldAvg, FMax, FMin, Colours, XMin, XMax, YMin, YMax, CBMin, CBMax, dx, dy, SaveFile, DataOnly) for i in range(Start, End)]
             done = 0
             last_idx = -1
-            if DataOnly:
-                to_include = Species.copy() if Species else []
-                if Field: to_include.append(Field)
-                if FieldAvg: to_include.append(FieldAvg)
-                to_return = {type : {'data': np.array(([None] * self.LenSim)), 'axis': defaultdict(list)} for type in to_include}
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
                 futs = [ex.submit(Iter_Plot, t) for t in tasks]
                 try:
@@ -775,44 +803,48 @@ class Process():
         elif MultiPros:
             if DataOnly:
                 to_include = Species.copy() if Species else []
-                if Field: to_include.append(Field)
-                if FieldAvg: to_include.append(FieldAvg)
+                if Field:
+                    for F in Field: to_include.append(F)
+                if FieldAvg:
+                    for F in FieldAvg: to_include.append(f"{F}_avg")
                 to_return = {type : {'data': [], 'axis': defaultdict(list)} for type in to_include}
                 if Field:
-                    if self.Code == "SMILEI":
-                        F_data, F_axis = self.GetData("Fields", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                    elif self.Code == "EPOCH":
-                        if 'E' in Field:
-                            F_data, F_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                        elif Field == 'Intensity':
-                            tmpField = None
-                            if self.DiagCheck(f"Electric_Field_Ey"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ey", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2
-                            if self.DiagCheck(f"Electric_Field_Ex"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ex", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
-                            if self.DiagCheck(f"Electric_Field_Ez"):
-                                tmp, F_axis = self.GetData("Electric_Field", "Ez", self.space_axis, Iter, dx=dx, dy=dy)
-                                tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
-                            # tmpField = tmpField
-                            F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
-                        elif 'B' in Field:
-                            F_data, F_axis = self.GetData("Magnetic_Field", Field, self.space_axis, Iter, dx=dx, dy=dy)
-                    to_return[Field]['data'] = np.array(F_data)
-                    for k, v in F_axis.items():
-                        to_return[Field]['axis'][k] = np.array(v)
+                    for F in Field:
+                        if self.Code == "SMILEI":
+                            F_data, F_axis = self.GetData("Fields", F, self.space_axis, Iter, dx=dx, dy=dy)
+                        elif self.Code == "EPOCH":
+                            if 'E' in F:
+                                F_data, F_axis = self.GetData("Electric_Field", F, self.space_axis, Iter, dx=dx, dy=dy)
+                            elif F == 'Intensity':
+                                tmpField = None
+                                if self.DiagCheck(f"Electric_Field_Ey"):
+                                    tmp, F_axis = self.GetData("Electric_Field", "Ey", self.space_axis, Iter, dx=dx, dy=dy)
+                                    tmpField = tmp**2
+                                if self.DiagCheck(f"Electric_Field_Ex"):
+                                    tmp, F_axis = self.GetData("Electric_Field", "Ex", self.space_axis, Iter, dx=dx, dy=dy)
+                                    tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                                if self.DiagCheck(f"Electric_Field_Ez"):
+                                    tmp, F_axis = self.GetData("Electric_Field", "Ez", self.space_axis, Iter, dx=dx, dy=dy)
+                                    tmpField = tmp**2 if tmpField is None else tmpField + tmp**2
+                                # tmpField = tmpField
+                                F_data = (self.c * self.epsilon0 * tmpField/2) * 1e-4
+                            elif 'B' in F:
+                                F_data, F_axis = self.GetData("Magnetic_Field", F, self.space_axis, Iter, dx=dx, dy=dy)
+                        to_return[F]['data'] = np.array(F_data)
+                        for k, v in F_axis.items():
+                            to_return[F]['axis'][k] = np.array(v)
                 if FieldAvg:
-                    if self.Code == "SMILEI":
-                        F_data, F_axis = self.GetData("Fields", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                    elif self.Code == "EPOCH":
-                        if 'E' in FieldAvg:
-                            F_data, F_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                        elif 'B' in FieldAvg:
-                            F_data, F_axis = self.GetData("Magnetic_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
-                    to_return[FieldAvg]['data'] = np.array(F_data)
-                    for k, v in F_axis.items():
-                        to_return[FieldAvg]['axis'][k] = np.array(v)
+                    for F in FieldAvg:
+                        if self.Code == "SMILEI":
+                            F_data, F_axis = self.GetData("Fields", F, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                        elif self.Code == "EPOCH":
+                            if 'E' in F:
+                                F_data, F_axis = self.GetData("Electric_Field", F, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                            elif 'B' in F:
+                                F_data, F_axis = self.GetData("Magnetic_Field", F, self.space_axis, Iter, Averaged=True, dx=dx, dy=dy)
+                        to_return[f"{F}_avg"]['data'] = np.array(F_data)
+                        for k, v in F_axis.items():
+                            to_return[f"{F}_avg"]['axis'][k] = np.array(v)
                 if Species:
                     for type in Species:
                         if self.Code == "SMILEI":
