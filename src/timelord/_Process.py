@@ -304,6 +304,7 @@ class Process():
             os.mkdir(self.pros_path)
         Message += f"\nVideos will be saved in \033[1;32m{self.pros_path}\033[0m\n"
         if self.Log: print(Message)
+        return
 
     def DiagCheck(self, Diag, SmileiName=None):
         """Check if a diagnostic exists in the simulation.
@@ -799,6 +800,7 @@ class Process():
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, Start, End, SaveFile)
                 if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
 
         elif MultiPros:
             if DataOnly:
@@ -949,6 +951,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + "/" + File + "_" + str(Iter) + ".png",dpi=200)
             plt.close(fig)
+            return
         
     def SpectraPlot(self, Species=[], XMax=None, YMin=None, YMax=None, File=None, Z=None, Avereraged=True, DataOnly=False, MultiPros=False, Iter=None):
         """Plot energy spectra for specified species.
@@ -1033,6 +1036,7 @@ class Process():
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                 if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
 
         elif MultiPros:
             if DataOnly:
@@ -1176,6 +1180,7 @@ class Process():
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                     if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
 
         elif MultiPros:
             type = Species
@@ -1204,6 +1209,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
+            return
 
     def AngleEnergyPlot(self, Species=[], AngleOffset=0, Angles=[], YMin=None, YMax=None, XMax=None, File=None, Z=1, Averaged=True, DataOnly=False, MultiPros=False, Iter=None):
         """Plot energy distribution for specified species within given angle ranges.
@@ -1290,6 +1296,7 @@ class Process():
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                     if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
         
         elif MultiPros:
             type = Species
@@ -1319,6 +1326,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
+            return
 
     def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0.5, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
         """Plot lineouts of specified species densities and electric fields.
@@ -1406,6 +1414,7 @@ class Process():
             if self.Movie:
                 MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                 if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
             
         elif MultiPros:
             
@@ -1453,6 +1462,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
+            return
 
     def EnergyTimePlot(self, Species=[], XMin=None, XMax=None, YMin=None, YMax=None, YMin2=None, YMax2=None, Average=True, File=None, Z=None):
         """Plot maximum energy vs time for specified species.
@@ -1525,6 +1535,7 @@ class Process():
         fig2.savefig(self.pros_path + '/' + SaveFile + '_energy_time_deriv.png',dpi=200)
         plt.close(fig2)
         if self.Log: print(f"\nEnergy time plots saved in {self.pros_path}")
+        return
 
     def PhaseSpacePlot(self, Species=[], Phase=None, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, Z=None, dx=1, dy=1, DataOnly=False, MultiPros=False, Iter=None):
         """Plot phase space for specified species.
@@ -1665,6 +1676,7 @@ class Process():
                 if self.Movie:
                     MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
                     if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
         elif MultiPros:
             type = Species
             phase_axis = Phase.split('_')
@@ -1712,6 +1724,7 @@ class Process():
             fig.tight_layout()
             plt.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=200)
             plt.close(fig)
+            return
 
     def LasIonFrontPlot(self, FSpot=1.0, EMax=None, XMin=None, XMax=None, dx=1, dy=1, File=None):
         SaveFile=File if File is not None else "Las_Ion_Front"
@@ -1786,6 +1799,7 @@ class Process():
         if self.Movie:
             MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
             print(f"\nMovies saved in {self.pros_path}")
+        return
 
     def CDSurfacePlot(self, FSpot=0.5, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None):
         if FSpot < 1:
@@ -1824,6 +1838,7 @@ class Process():
         ax2.set_title('Electron Density and\nRelativistic Critical Density')
         self.plt.savefig(self.pros_path + '/' + SaveFile + '.png',dpi=200)
         print(f"\nCritical density surface saved in {self.pros_path}")
+        return
 
 
     def Help(self):
@@ -1842,3 +1857,4 @@ class Process():
             if first_line:
                 print(f"    {first_line}")
             print()
+        return

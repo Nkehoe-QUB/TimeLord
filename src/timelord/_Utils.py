@@ -68,6 +68,7 @@ def PrintPercentage(current_value, max_value):
     bar = '|' + '#' * int(percentage) + ' ' * (100 - int(percentage))
     sys.stdout.write(f'\r[{bar}] {percentage}%')
     sys.stdout.flush()
+    return
 
 def MakeMovie(GraphFolder, OutputFolder, initialfile, finalfile, quantity):
     import pathlib
@@ -93,6 +94,7 @@ def MakeMovie(GraphFolder, OutputFolder, initialfile, finalfile, quantity):
         else:
              print(filename + 'image does not exist')
     video.release()
+    return
 
 def MovingAverage(x, n):
     import numpy as np
@@ -458,7 +460,7 @@ def sdf_to_hdf5(
 
     if verbose:
         print(f"Done: {h5_path} (skipped={skipped_count}, deleted={deleted})")
-    # return h5_path, deleted, skipped_count
+    return 
 
 def pick_safe_workers(cap=8) -> int:
     """
