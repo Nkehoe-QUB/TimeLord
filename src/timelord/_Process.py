@@ -21,6 +21,7 @@ try:
 except:
     pass
 from ._Utils import *
+from matplotlib.colors import LinearSegmentedColormap
 
 class Process():
     def __init__(self, SimName=".", Code=None, Ped=None, Log=True, Geo='cart', Movie=True, Test=False, DelData=True, Prefix=None):
@@ -900,11 +901,29 @@ class Process():
             if self.Dim > 1:
                 if Species:
                     for type in Species:
-                        if "rel" in type and not EkBar and CBMin is None:
-                            CBMin = 1e0
+                        if "rel" in type and not EkBar:
+                            # Log range
+                            vmin = 1e-3 if CBMin is None else CBMin
+                            vmax = 1e3 if CBMax is None else CBMax
+                            vmid = 1e0
+
+                            # Position of vmid in log space
+                            mid = (np.log10(vmid) - np.log10(vmin)) / \
+                                (np.log10(vmax) - np.log10(vmin))
+
+                            # Sample colours from the original colormaps
+                            n = 256
+                            greys = plt.cm.Greys_r(np.linspace(0, 0.8, int(n * mid)))
+                            blues = plt.cm.Blues(np.linspace(0.4, 1, int(n * (1 - mid))))
+
+                            # Combine them
+                            colors_combined = np.vstack((greys, blues))
+                            cmap = LinearSegmentedColormap.from_list(
+                                'GreysBlues', colors_combined
+                            )
                         if self.Test: print(axis[type]['x'].shape, axis[type]['y'].shape, den_to_plot[type].T.shape)
                         if not EkBar:
-                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]) if hasattr(cmaps, Colours[Species.index(type)]) else Colours[Species.index(type)],
+                            cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmap if "rel" in type else cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]) if hasattr(cmaps, Colours[Species.index(type)]) else Colours[Species.index(type)],
                                               norm=cm.LogNorm(vmin=1e-3 if CBMin is None else CBMin, vmax=1e3 if CBMax is None else CBMax), zorder=1+Species.index(type))
                         else:
                                 cax=ax.pcolormesh(axis[type]['x'], axis[type]['y'], den_to_plot[type].T, cmap=cmaps.batlowK if Colours is None else getattr(cmaps, Colours[Species.index(type)]) if hasattr(cmaps, Colours[Species.index(type)]) else Colours[Species.index(type)],
