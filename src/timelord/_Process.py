@@ -1347,15 +1347,15 @@ class Process():
             plt.close(fig)
             return
 
-    def LineOut(self, Species=None, E_las=False, E_avg=False, FSpot=0.5, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
+    def LineOut(self, Species=None, Field=False, FieldAvg=False, FSpot=0.5, FMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None, MultiPros=False, Iter=None):
         """Plot lineouts of specified species densities and electric fields.
         Parameters:
         -----------
         Species : list of str, optional
             List of species to plot (e.g., ['electron', 'proton']).
-        E_las : str or bool, optional
+        Field : str or bool, optional
             Electric field component to plot (e.g., 'E1'). If False, no laser field is plotted.
-        E_avg : str or bool, optional
+        FieldAvg : str or bool, optional
             Averaged electric field component to plot (e.g., 'E1'). If False, no averaged field is plotted.
         FSpot : float, optional
             Full width of the spot to average over in microns (default is 0, no averaging).
@@ -1380,36 +1380,36 @@ class Process():
         None
         """
         if not MultiPros:
-            if Species is None  and (E_las is False and E_avg is False):
+            if Species is None  and (Field is False and FieldAvg is False):
                 raise ValueError("No species or field were provided")
             if Species is not None and not isinstance(Species, list):
                 Species = [Species]
                 for type in Species:
                     self.DiagCheck(f"Derived_Number_Density_{type}")
-            if E_las:
-                self.DiagCheck(f"Electric_Field_{E_las}")
-            if E_avg:
-                self.DiagCheck(f"Electric_Field_{E_avg}_averaged")
+            if Field:
+                self.DiagCheck(f"Electric_Field_{Field}")
+            if FieldAvg:
+                self.DiagCheck(f"Electric_Field_{FieldAvg}_averaged")
             if self.Log:
-                if Species is not None and (E_las or E_avg):
-                    print(f"\nPlotting {[f'{s}' for s in Species]} densities and{f' {E_las}' if E_las else ''}{' and' if E_las and E_avg else ''}{f' {E_avg}' if E_avg else ''} field lineouts")
+                if Species is not None and (Field or FieldAvg):
+                    print(f"\nPlotting {[f'{s}' for s in Species]} densities and{f' {Field}' if Field else ''}{' and' if Field and FieldAvg else ''}{f' {FieldAvg}' if FieldAvg else ''} field lineouts")
                 elif Species is not None:
                     print(f"\nPlotting {[f'{s}' for s in Species]} densities lineouts")
                 else:
-                    print(f"\nPlotting {E_las if E_las else E_avg} field lineouts")
+                    print(f"\nPlotting {Field if Field else FieldAvg} field lineouts")
             if File is None:
                 SaveFile = "lineout"
-                if E_las:
-                    SaveFile=f"{E_las}_{SaveFile}" 
-                elif E_avg:
-                    SaveFile=f"{E_avg}_avg_{SaveFile}"
+                if Field:
+                    SaveFile=f"{Field}_{SaveFile}" 
+                elif FieldAvg:
+                    SaveFile=f"{FieldAvg}_avg_{SaveFile}"
                 if Species is not None:
                     if len(Species) == 1:
                         SaveFile=f"{Species[0]}_{SaveFile}"
                     else:
                         SaveFile=f"{'_'.join(Species)}_{SaveFile}"
             else: SaveFile = File
-            tasks = [(i, self, 'LineOut', Species, E_las, E_avg, FSpot, FMax, YMin, YMax, XMin, XMax, SaveFile) for i in range(self.LenSim)]
+            tasks = [(i, self, 'LineOut', Species, Field, FieldAvg, FSpot, FMax, YMin, YMax, XMin, XMax, SaveFile) for i in range(self.LenSim)]
             done = 0
             last_idx = -1
             with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -1441,17 +1441,17 @@ class Process():
             lnf = None
             den_to_plot={}
             axis={}
-            if E_las:
-                E_data, E_axis = self.GetData("Electric_Field", E_las, self.space_axis, Iter, dx=1, dy=1)
-            elif E_avg:
-                E_data, E_axis = self.GetData("Electric_Field", E_avg, self.space_axis, Iter, Averaged=True, dx=1, dy=1)
+            if Field:
+                Field_data, Field_axis = self.GetData("Electric_Field", Field, self.space_axis, Iter, dx=1, dy=1)
+            elif FieldAvg:
+                Field_data, Field_axis = self.GetData("Electric_Field", FieldAvg, self.space_axis, Iter, Averaged=True, dx=1, dy=1)
             if Species is not None:
                 for type in Species:
                     den_to_plot[type], axis[type] = self.GetData("Derived_Number_Density", type, self.space_axis, Iter, dx=1, dy=1)
-            xmax = np.max(E_axis['x']) if E_las or E_avg else np.max(axis[Species[0]]['x'])
-            xmin = np.min(E_axis['x']) if E_las or E_avg else np.min(axis[Species[0]]['x'])
+            xmax = np.max(Field_axis['x']) if Field or FieldAvg else np.max(axis[Species[0]]['x'])
+            xmin = np.min(Field_axis['x']) if Field or FieldAvg else np.min(axis[Species[0]]['x'])
             ax.set(xlabel='x [μm]', xlim=(xmin if XMin is None else XMin, xmax if XMax is None else XMax),
-                   title=f"{E_axis['Time']}fs" if E_las or E_avg else f"{axis[Species[0]]['Time']}fs")
+                   title=f"{Field_axis['Time']}fs" if Field or FieldAvg else f"{axis[Species[0]]['Time']}fs")
             if Species:
                 ax.set(ylabel='N [$N_c$]', yscale='log', ylim=(1e-2 if YMin is None else YMin, 1e3 if YMax is None else YMax))
                 for type in Species:
@@ -1465,15 +1465,15 @@ class Process():
                         ax.fill_between(axis[type]['x'], np.reshape(np.mean(den_to_plot[type][:, args], axis=1), axis[type]['x'].shape), 1e-2 if YMin is None else YMin, color=self.Colours[type] if type in self.Colours.keys() else None, alpha=0.2)
                     lnf = lns if lnf is None else lnf + lns
 
-            if E_las or E_avg:
+            if Field or FieldAvg:
                 ax2 = ax.twinx() if Species else ax
-                ax2.set(ylim=(-np.nanmax(abs(E_data)) if FMax is None else -FMax, np.nanmax(abs(E_data)) if FMax is None else FMax), ylabel=f"{E_las if E_las else E_avg} [{ 'V/m' if (['E' in E_las] if E_las else ['E' in E_avg]) else 'T'}]")
+                ax2.set(ylim=(-np.nanmax(abs(Field_data)) if FMax is None else -FMax, np.nanmax(abs(Field_data)) if FMax is None else FMax), ylabel=f"{Field if Field else FieldAvg} [{ 'V/m' if (['E' in Field] if Field else ['E' in FieldAvg]) else 'T'}]")
                 if self.Dim == 1:
-                    lns = ax2.plot(E_axis['x'], E_data, 'k--' if E_las else 'r', label=E_las if E_las else E_avg)
+                    lns = ax2.plot(Field_axis['x'], Field_data, 'k--' if Field else 'r', label=Field if Field else FieldAvg)
                 elif self.Dim > 1:
-                    if FSpot != 0: Ex_arg = np.argwhere(abs(E_axis['y']) <= FSpot/2)
-                    else: Ex_arg = np.argwhere(abs(E_axis['y']) <= np.min(abs(E_axis['y'])))
-                    lns = ax2.plot(E_axis['x'], np.mean(E_data[:, Ex_arg], axis=1), 'k--' if E_las else 'r', label=E_las if E_las else E_avg)
+                    if FSpot != 0: Ex_arg = np.argwhere(abs(Field_axis['y']) <= FSpot/2)
+                    else: Ex_arg = np.argwhere(abs(Field_axis['y']) <= np.min(abs(Field_axis['y'])))
+                    lns = ax2.plot(Field_axis['x'], np.mean(Field_data[:, Ex_arg], axis=1), 'k--' if Field else 'r', label=Field if Field else FieldAvg)
                 lnf = lns if lnf is None else lnf + lns
             labs = [l.get_label() for l in lnf]
             if Species: ax.legend(lnf, labs)
@@ -1745,80 +1745,96 @@ class Process():
             plt.close(fig)
             return
 
-    def LasIonFrontPlot(self, FSpot=1.0, EMax=None, XMin=None, XMax=None, dx=1, dy=1, File=None):
-        SaveFile=File if File is not None else "Las_Ion_Front"
-        data = {}
-        axis = {}
-        print(f"\nGetting data")
-        if self.Log: 
-            PrintPercentage(0, 3 )
-        tmp = self.DensityPlot('electron', E_avg='Ex', dx=dx, dy=dy, DataOnly=True)
-        data['electron'], axis['electron'] = tmp['electron']['data'], tmp['electron']['axis']
-        data['ex'], axis['ex'] = tmp['ex']['data'], tmp['ex']['axis']
-        if self.Log: 
-            PrintPercentage(2, 3 )
-        data['proton'], axis['proton'] = self.GetData('dist_fn_x_energy', 'proton', ['x', 'ekin'])
-        if self.Log: 
-            PrintPercentage(3, 3 )
-        print(f"\nData loaded")
+    def LasIonFrontPlot(self, FSpot=1.0, FMax=None, FMin=None, XMin=None, XMax=None, CBMin=None, CBMax=None, dx=1, dy=1, File=None, data=None, axis=None, ion_front=None, las_front=None, MultiPros=False, Iter=None):
+        if not MultiPros:
+            SaveFile=File if File is not None else "Las_Ion_Front"
+            data = {}
+            axis = {}
+            print(f"\nGetting data")
+            tmp = self.DensityPlot('electron', FieldAvg='Ex', dx=dx, dy=dy, DataOnly=True)
+            data['electron'], axis['electron'] = tmp['electron']['data'], tmp['electron']['axis']
+            data['Ex_avg'], axis['Ex_avg'] = tmp['Ex_avg']['data'], tmp['Ex_avg']['axis']
+            tmp = self.PhaseSpacePlot('proton', 'x_energy', dx=dx, dy=dy, DataOnly=True)['proton']
+            data['proton'], axis['proton'] = tmp['data'], tmp['axis']
+            print(f"\nData loaded")
 
-        num_protons = data['proton'].shape[1]
+            num_protons = data['proton'].shape[2]
 
-        ion_front = np.zeros(self.LenSim)
-        las_front = np.zeros(self.LenSim)
+            ion_front = np.zeros(self.LenSim)
+            las_front = np.zeros(self.LenSim)
 
-        print(f"\nCalculating Laser-Ion-Fronts")
-        for t in range(1, self.LenSim):
-            Outline = np.zeros(num_protons)
+            print(f"\nCalculating Laser-Ion-Fronts")
+            for t in range(1, self.LenSim):
+                Outline = np.zeros(num_protons)
 
-            args = np.argwhere(np.sum(data['proton'][t], axis=0) >= 1e12)[:,0]
-            for j in range(num_protons):
-                try: Outline[j] = np.max(axis['proton']['ekin'][t][data['proton'][t][j,args] > 1e5])
-                except ValueError: Outline[j] = 0
-            ion_front = axis['proton']['x'][np.argmax(Outline)]
+                args = np.argwhere(np.sum(data['proton'][t], axis=0) >= 1e12)[:,0]
+                for j in range(num_protons):
+                    try: Outline[j] = np.max(axis['proton']['ekin'][t][args])
+                    except: Outline[j] = 0
+                ion_front[t] = axis['proton']['x'][t][np.argmax(Outline)]
 
-            Ex_arg = np.argwhere(abs(axis['ex']['y']) < 0.5)
-            ExField = np.reshape(np.mean(data['ex'][t][:, Ex_arg], axis=1), axis['ex']['x'].shape)
-            las_front = axis['ex']['x'][np.argmax(ExField)]
+                Ex_arg = np.argwhere(abs(axis['Ex_avg']['y'][t]) < 0.5)
+                ExField = np.reshape(np.mean(data['Ex_avg'][t][:, Ex_arg], axis=1), axis['Ex_avg']['x'][t].shape)
+                las_front[t] = axis['Ex_avg']['x'][t][np.argmax(ExField)]
 
-        print(f"\nPlotting Laser-Ion-Fronts")
-        xmin = np.min(axis['ex']['x']) if XMin is None else XMin
-        xmax = np.max(axis['ex']['x']) if XMax is None else XMax
-        for t in range(1, self.LenSim):
-            fig, ax = plt.subplots(3, sharex=True, num=11, clear=True, figsize=(8, 10))
-            ax[0].pcolormesh(axis['ex']['x'], axis['ex']['y'], data['ex'][t].T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=self.max_number if EMax is None else EMax))
+            print(f"\nPlotting Laser-Ion-Fronts")
+            tasks = [(i, self, 'LasIonFrontPlot', FSpot, FMax, FMin, XMin, XMax, CBMin, CBMax, dx, dy, SaveFile, data, axis, ion_front, las_front) for i in range(self.LenSim)]
+            done = 0
+            last_idx = -1
+            with ProcessPoolExecutor(max_workers=self.workers) as ex:
+                futs = [ex.submit(Iter_Plot, t) for t in tasks]
+                try:
+                    for fut in as_completed(futs):
+                        i, data, err, tb = fut.result()
+                        if err:
+                            Print_Error(futs, ex, i, err, tb)
+                        else:
+                            done += 1
+                            # keep your existing percentage display
+                            idx_equiv = int((done - 1) * (self.LenSim - 1) / max(1, self.LenSim - 1))
+                            if idx_equiv != last_idx:
+                                if self.Log: PrintPercentage(idx_equiv, self.LenSim - 1)
+                                last_idx = idx_equiv
+                finally:
+                    # make sure we don't block on shutdown; it's idempotent
+                    ex.shutdown(wait=False, cancel_futures=True)
+                if self.Log: print(f"\nPhase spaces saved in {self.raw_path}")
+                if self.Movie:
+                    MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
+                    if self.Log: print(f"\nMovies saved in {self.pros_path}")
+            return
+        else:
+            xmin = np.min(axis['Ex_avg']['x'][Iter]) if XMin is None else XMin
+            xmax = np.max(axis['Ex_avg']['x'][Iter]) if XMax is None else XMax
+            Ex_arg = np.argwhere(abs(axis['Ex_avg']['y'][Iter]) < 0.5)
+            fig, ax = plt.subplots(3, sharex=True, clear=True, figsize=(8, 10))
+            ax[0].pcolormesh(axis['Ex_avg']['x'][Iter], axis['Ex_avg']['y'][Iter], data['Ex_avg'][Iter].T, cmap=cmaps.vik, norm=cm.CenteredNorm(halfrange=np.nanmax(data['Ex_avg'][Iter].T) if FMax is None else FMax))
             ax2=ax[1].twinx()
-            ax[1].plot(axis['electron']['x'], np.mean(data['electron'][t][:, np.argwhere(abs(axis['electron']['y']) < 0.5)], axis=1), color='blue')
-            ax2.plot(axis['ex']['x'], np.mean(data['ex'][t][:, Ex_arg], axis=1), color='red')
-            ax[2].pcolormesh(axis['proton']['x'], axis['proton']['ekin'][t], data['proton'][t].T, norm=cm.LogNorm(vmin=round_up_scientific_notation(np.max(data['proton']))/1e6, vmax=round_up_scientific_notation(np.max(data['proton']))), cmap=cmaps.batlowW_r)
+            ax[1].plot(axis['electron']['x'][Iter], np.mean(data['electron'][Iter][:, np.argwhere(abs(axis['electron']['y'][Iter]) < 0.5)], axis=1), color='blue')
+            ax2.plot(axis['Ex_avg']['x'][Iter], np.mean(data['Ex_avg'][Iter][:, Ex_arg], axis=1), color='red')
+            ax[2].pcolormesh(axis['proton']['x'][Iter], axis['proton']['ekin'][Iter], data['proton'][Iter].T, norm=cm.LogNorm(vmin=round_up_scientific_notation(np.max(data['proton'][Iter]))/1e6 if CBMin is None else CBMin, vmax=round_up_scientific_notation(np.max(data['proton'][Iter])) if CBMax is None else CBMax), cmap=cmaps.batlowW_r)
             ax[0].set(ylabel='y [$\\mu$m]')
             ax[1].set(yscale='log', ylim=(1e-2, 5e1), ylabel='N$_e$ [N$_c$]')
-            ax[2].set(ylim=(0, np.max(axis['proton']['ekin'])), ylabel='E [MeV]',
-                      xlabel='x [$\\mu$m]', xlim=(xmin, xmax))
-            ax2.set(ylim=(-self.max_number, self.max_number), ylabel='E$_x$ [V/m]')
+            ax[2].set(ylim=(0, np.max(axis['proton']['ekin'][Iter])), ylabel='E [MeV]',
+                    xlabel='x [$\\mu$m]', xlim=(xmin, xmax))
+            ax2.set(ylim=(-np.nanmax(data['Ex_avg'][Iter].T) if FMin is None else FMin, np.nanmax(data['Ex_avg'][Iter].T) if FMax is None else FMax), ylabel='E$_x$ [V/m]')
             ax[1].grid()
             ax[2].grid()
-            ax[0].axvline(x=ion_front[t], color='green', linestyle='--')
-            ax[0].axvline(x=las_front[t], color='red', linestyle='--')
-            ax[1].axvline(x=ion_front[t], color='green', linestyle='--')
-            ax[1].axvline(x=las_front[t], color='red', linestyle='--')
-            ax[2].axvline(x=ion_front[t], color='green', linestyle='--')
-            ax[2].axvline(x=las_front[t], color='red', linestyle='--')
+            ax[0].axvline(x=ion_front[Iter], color='green', linestyle='--')
+            ax[0].axvline(x=las_front[Iter], color='red', linestyle='--')
+            ax[1].axvline(x=ion_front[Iter], color='green', linestyle='--')
+            ax[1].axvline(x=las_front[Iter], color='red', linestyle='--')
+            ax[2].axvline(x=ion_front[Iter], color='green', linestyle='--')
+            ax[2].axvline(x=las_front[Iter], color='red', linestyle='--')
             for a in ax.flatten():
                 for label in (a.get_xticklabels() + a.get_yticklabels()): 
                     label.set_fontsize(16)
                 a.xaxis.label.set_fontsize(18)
                 a.yaxis.label.set_fontsize(18)
-            fig.suptitle(f"{axis['proton']['Time'][t]} fs", fontsize=22)
+            fig.suptitle(f"{axis['proton']['Time'][Iter]} fs", fontsize=22)
             fig.tight_layout()
-            fig.savefig(self.raw_path + '/' + SaveFile + '_' + str(t) + '.png',dpi=300)
-            if self.Log: 
-                PrintPercentage(t, self.TimeSteps.size -1 )
-        print(f"\nLaser-Ion-Fronts saved in {self.raw_path}")
-        if self.Movie:
-            MakeMovie(self.raw_path, self.pros_path, 0, self.LenSim, SaveFile)
-            print(f"\nMovies saved in {self.pros_path}")
-        return
+            fig.savefig(self.raw_path + '/' + File + '_' + str(Iter) + '.png',dpi=300)
+            return
 
     def CDSurfacePlot(self, FSpot=0.5, CBMin=None, CBMax=None, YMin=None, YMax=None, XMin=None, XMax=None, File=None):
         if FSpot < 1:
