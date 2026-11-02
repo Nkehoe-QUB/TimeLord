@@ -141,11 +141,11 @@ class Process():
                 else:
                     Prefix = visit_files[0].split('.visit')[0]
             LenSDF = len([
-                int(os.path.splitext(os.path.basename(i))[0])
+                os.path.splitext(os.path.basename(i))[0]
                 for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.sdf')
             ])
             LenHDF = len([
-                int(os.path.splitext(os.path.basename(i))[0])
+                os.path.splitext(os.path.basename(i))[0]
                 for i in glob.glob(f'{self.SimulationPath}/{"" if not self.FilePrefix else self.FilePrefix}*.h5')
             ])
 
